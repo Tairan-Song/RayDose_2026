@@ -45,6 +45,19 @@ Full run:
 python scripts/python/generate_dose_support_masks.py `
   --training-dir data/photon/training `
   --stats-csv data/photon/training/dose_mask_stats_gt_1pct_py.csv `
+  --workers 6 `
+  --force
+```
+
+Nonzero-dose baseline:
+
+```powershell
+python scripts/python/generate_dose_support_masks.py `
+  --training-dir data/photon/training `
+  --label-name dose_nonzero `
+  --threshold-fraction 0 `
+  --stats-csv data/photon/training/dose_mask_stats_nonzero.csv `
+  --workers 6 `
   --force
 ```
 
