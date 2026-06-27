@@ -23,7 +23,7 @@ if ($MaxFiles -le 0) {
 
 $thresholdName = ("dose_gt_{0:p0}" -f $ThresholdFraction).Replace("%", "pct").Replace(" ", "")
 $outDir = Join-Path $casePath.Path "label_masks\$thresholdName"
-$scriptPath = Join-Path $PSScriptRoot "New-DoseMaskLabel.ps1"
+$scriptPath = Join-Path $PSScriptRoot "01_generate_mask_for_one_dose.ps1"
 
 $doseFiles = Get-ChildItem -LiteralPath $doseDir -Filter "Dose_B*_CP*.mha" -File |
     Sort-Object Name |

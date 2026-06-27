@@ -28,32 +28,43 @@ The objective is to predict three-dimensional photon dose distributions from:
 
 The official Monte Carlo dose files are used as supervised labels. We do not reproduce Monte Carlo transport directly; the goal is to train a deep learning surrogate for fast dose prediction.
 
-## Included Scripts
+## Code Organization
 
-### Dose-Support Mask Generation
+Scripts are organized by language:
 
-- `scripts/New-DoseMaskLabel.ps1`
-  - Generate a binary dose-support mask for one `Dose_Bx_CPy.mha` file.
+```text
+scripts/
+  README.md
+  python/
+    mha_io.py
+    generate_dose_support_masks.py
+    evaluate_mask_definitions.py
+    requirements.txt
+  powershell/
+    01_generate_mask_for_one_dose.ps1
+    02_generate_masks_for_one_case.ps1
+    03_generate_full_photon_1pct_masks.ps1
+    04_summarize_1pct_masks.ps1
+    05_evaluate_mask_definitions.ps1
+    06_summarize_mask_definition_eval.ps1
+    07_make_mask_recommendation_matrix.ps1
+```
 
-- `scripts/New-DoseMaskLabelsForCase.ps1`
-  - Generate masks for a limited subset of one case.
+Use Python for new algorithm and training-pipeline work. The main Python entry
+point is:
 
-- `scripts/New-PhotonDoseMaskLabels.ps1`
-  - Generate full photon `dose_gt_1pct` masks and detailed statistics.
+```text
+scripts/python/generate_dose_support_masks.py
+```
 
-- `scripts/Summarize-DoseMaskLabels.ps1`
-  - Summarize `dose_gt_1pct` statistics by case.
+Use PowerShell only to reproduce the already validated Windows preprocessing
+outputs.
 
-### Auxiliary Mask Definition Evaluation
+See:
 
-- `scripts/Evaluate-AuxiliaryMaskDefinitions.ps1`
-  - Evaluate threshold, dilation, and gradient-based auxiliary mask definitions.
-
-- `scripts/Summarize-AuxiliaryMaskDefinitions.ps1`
-  - Summarize mask-definition statistics by definition.
-
-- `scripts/New-AuxiliaryMaskRecommendationMatrix.ps1`
-  - Generate a recommendation matrix for dose regression, dose-support prediction, and edge-aware loss.
+```text
+scripts/README.md
+```
 
 ## Data Policy
 
@@ -75,4 +86,3 @@ Based on full photon stats-only evaluation:
 - Weighted dose regression: `dose_gt_1pct_dilate2`
 - Edge-aware loss: `dose_gradient_top10pct`
 - Baseline comparison: `dose_nonzero`
-
