@@ -68,8 +68,6 @@ scripts/README.md
 
 ## Data Policy
 
-The full DoseRAD2026 data is intentionally ignored by git via `.gitignore`.
-
 Expected local data root:
 
 ```text
