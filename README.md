@@ -57,8 +57,8 @@ point is:
 scripts/python/generate_dose_support_masks.py
 ```
 
-Use PowerShell only to reproduce the already validated Windows preprocessing
-outputs.
+PowerShell scripts are optional Windows helper scripts. Python is the preferred
+workflow for data preparation and model development.
 
 See:
 
@@ -66,19 +66,21 @@ See:
 scripts/README.md
 ```
 
-## Data Policy
+## Dataset
 
-Expected local data root:
+The DoseRAD2026 dataset should be obtained from the official challenge data
+source according to the challenge rules and license.
+
+The scripts use the following default data path, which can be changed with
+command-line arguments:
 
 ```text
 data/photon/training
 ```
 
-Generated masks and CSV statistics are also under `data/` and are not committed.
+## Initial Mask Choices
 
-## Current Auxiliary Mask Recommendation
-
-Based on full photon stats-only evaluation:
+Current working choices for auxiliary dose-mask experiments:
 
 - Dose-support prediction: `dose_gt_1pct`
 - Weighted dose regression: `dose_gt_1pct_dilate2`

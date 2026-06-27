@@ -2,9 +2,8 @@
 
 Use Python as the main workflow.
 
-PowerShell scripts are kept only because the current Windows preprocessing
-outputs were originally generated with them. New algorithm work should be in
-Python.
+PowerShell scripts are optional Windows helper scripts. New algorithm and model
+work should be in Python.
 
 ## Main Python Scripts
 
@@ -30,7 +29,7 @@ Purpose:
 - write one mask per dose file
 - write a CSV summary
 
-Small local test:
+Small test run:
 
 ```powershell
 python scripts/python/generate_dose_support_masks.py `
@@ -64,7 +63,7 @@ Purpose:
 - dilation masks around the 1% mask
 - gradient masks for dose-edge regions
 
-Small local test:
+Small test run:
 
 ```powershell
 python scripts/python/evaluate_mask_definitions.py `
@@ -121,4 +120,4 @@ These are optional reproduction scripts:
 07_make_mask_recommendation_matrix.ps1
 ```
 
-Do not use PowerShell for new model code. Use Python.
+Use Python for new model code.
