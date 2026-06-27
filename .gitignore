@@ -1,0 +1,11 @@
+data/
+outputs/
+packages/
+.tmp*/
+*.docx
+*.pdf
+*.zip
+*.pptx
+__pycache__/
+*.pyc
+
