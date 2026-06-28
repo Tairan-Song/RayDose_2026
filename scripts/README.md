@@ -47,7 +47,44 @@ case_id,split,seed,train_fraction
 All CT, JSON, dose, and mask files from the same case must stay in the same
 split.
 
-### 2. Generate Dose-Support Labels
+### 2. Preprocess One Training Sample
+
+Script:
+
+```text
+scripts/python/preprocess_training_sample.py
+```
+
+Purpose:
+
+- read one case + beam + control point sample
+- load CT, dose, and dose-support mask
+- clip CT HU to `[-1000, 3000]`
+- normalize CT to `[-1, 1]`
+- normalize dose by the sample max dose
+- crop/pad CT, dose, and mask to a fixed shape
+- save a compressed `.npz` for Dataset/model debugging
+
+Example:
+
+```powershell
+python scripts/python/preprocess_training_sample.py `
+  --training-dir data/photon/training `
+  --case-id 1ABB006 `
+  --beam-idx 0 `
+  --cp-idx 0 `
+  --mask-name dose_gt_1pct `
+  --target-shape "128 128 128" `
+  --output-npz outputs/preprocessing_smoke/1ABB006_B0_CP000.npz
+```
+
+Current assumptions:
+
+- crop center is the case beam `iso_center` when it can be mapped to voxel space
+- fallback crop center is the image center
+- this script is a smoke test for one sample, not a full preprocessing pipeline
+
+### 3. Generate Dose-Support Labels
 
 Script:
 
@@ -95,7 +132,7 @@ python scripts/python/generate_dose_support_masks.py `
   --force
 ```
 
-### 3. Evaluate Alternative Mask Definitions
+### 4. Evaluate Alternative Mask Definitions
 
 Script:
 
@@ -119,7 +156,7 @@ python scripts/python/evaluate_mask_definitions.py `
   --max-files 2
 ```
 
-### 4. MHA IO Helper
+### 5. MHA IO Helper
 
 Script:
 

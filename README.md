@@ -38,6 +38,7 @@ scripts/
   python/
     mha_io.py
     make_case_split.py
+    preprocess_training_sample.py
     generate_dose_support_masks.py
     evaluate_mask_definitions.py
     requirements.txt
