@@ -256,7 +256,35 @@ This writes:
 ```text
 outputs/energy_ablation/no_energy/
 outputs/energy_ablation/with_energy/
-outputs/energy_ablation/energy_ablation_summary.csv
+outputs/energy_ablation/ablation_summary.csv
+```
+
+Run a 2x2 CT-mode and energy ablation:
+
+```powershell
+python scripts/python/run_energy_ablation.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --output-root outputs/baseline_conditioning_ablation `
+  --ct-modes hu density `
+  --target-shape "64 64 64" `
+  --dose-mode global `
+  --global-dose-scale 1.5e-4 `
+  --max-train-samples 32 `
+  --max-val-samples 8 `
+  --batch-size 1 `
+  --epochs 5 `
+  --base-channels 8
+```
+
+This writes:
+
+```text
+outputs/baseline_conditioning_ablation/hu_no_energy/
+outputs/baseline_conditioning_ablation/hu_with_energy/
+outputs/baseline_conditioning_ablation/density_no_energy/
+outputs/baseline_conditioning_ablation/density_with_energy/
+outputs/baseline_conditioning_ablation/ablation_summary.csv
 ```
 
 Outputs:

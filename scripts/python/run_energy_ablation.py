@@ -1,4 +1,4 @@
-"""Run paired no-energy and with-energy 3D U-Net baseline experiments."""
+"""Run paired baseline ablations for CT mode and energy conditioning."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def bool_flag(cmd: list[str], enabled: bool, flag: str) -> None:
         cmd.append(flag)
 
 
-def build_train_command(args: argparse.Namespace, output_dir: Path, include_energy: bool) -> list[str]:
+def build_train_command(args: argparse.Namespace, output_dir: Path, ct_mode: str, include_energy: bool) -> list[str]:
     train_script = Path(__file__).with_name("train_3d_unet.py")
     cmd = [
         sys.executable,
@@ -30,7 +30,7 @@ def build_train_command(args: argparse.Namespace, output_dir: Path, include_ener
         "--mask-name",
         args.mask_name,
         "--ct-mode",
-        args.ct_mode,
+        ct_mode,
         "--dose-mode",
         args.dose_mode,
         "--global-dose-scale",
@@ -90,19 +90,22 @@ def read_best_metrics(metrics_csv: Path) -> dict[str, str]:
     }
 
 
-def write_summary(output_root: Path, experiment_dirs: dict[str, Path]) -> None:
-    rows: list[dict[str, str]] = []
-    for experiment, output_dir in experiment_dirs.items():
+def write_summary(output_root: Path, experiments: list[dict[str, object]]) -> None:
+    rows: list[dict[str, object]] = []
+    for experiment in experiments:
+        output_dir = Path(experiment["output_dir"])
         metrics = read_best_metrics(output_dir / "metrics.csv")
         if metrics:
-            rows.append({"experiment": experiment, "output_dir": str(output_dir), **metrics})
+            rows.append({**experiment, **metrics})
 
     if not rows:
         return
 
-    summary_csv = output_root / "energy_ablation_summary.csv"
+    summary_csv = output_root / "ablation_summary.csv"
     fieldnames = [
         "experiment",
+        "ct_mode",
+        "include_energy",
         "output_dir",
         "best_epoch",
         "best_val_loss",
@@ -120,13 +123,22 @@ def write_summary(output_root: Path, experiment_dirs: dict[str, Path]) -> None:
     print(f"wrote_summary={summary_csv}", flush=True)
 
 
-def run_experiment(name: str, args: argparse.Namespace, include_energy: bool) -> Path:
+def run_experiment(name: str, args: argparse.Namespace, ct_mode: str, include_energy: bool) -> dict[str, object]:
     output_dir = Path(args.output_root) / name
-    cmd = build_train_command(args, output_dir, include_energy)
+    cmd = build_train_command(args, output_dir, ct_mode, include_energy)
     print("running=" + " ".join(f'"{part}"' if " " in part else part for part in cmd), flush=True)
     if not args.dry_run:
         subprocess.run(cmd, check=True)
-    return output_dir
+    return {
+        "experiment": name,
+        "ct_mode": ct_mode,
+        "include_energy": int(include_energy),
+        "output_dir": str(output_dir),
+    }
+
+
+def selected_ct_modes(args: argparse.Namespace) -> list[str]:
+    return args.ct_modes if args.ct_modes else [args.ct_mode]
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,6 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-shape", default="64 64 64")
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
+    parser.add_argument("--ct-modes", nargs="+", choices=("hu", "density"), default=None)
     parser.add_argument("--dose-mode", choices=("sample_max", "global", "raw"), default="global")
     parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--max-train-samples", type=int, default=32)
@@ -163,14 +176,18 @@ def main() -> None:
     output_root = Path(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    experiment_dirs: dict[str, Path] = {}
-    if args.only in ("both", "no_energy"):
-        experiment_dirs["no_energy"] = run_experiment("no_energy", args, include_energy=False)
-    if args.only in ("both", "with_energy"):
-        experiment_dirs["with_energy"] = run_experiment("with_energy", args, include_energy=True)
+    ct_modes = selected_ct_modes(args)
+    multi_ct_mode = len(ct_modes) > 1
+    experiments: list[dict[str, object]] = []
+    for ct_mode in ct_modes:
+        prefix = f"{ct_mode}_" if multi_ct_mode else ""
+        if args.only in ("both", "no_energy"):
+            experiments.append(run_experiment(f"{prefix}no_energy", args, ct_mode, include_energy=False))
+        if args.only in ("both", "with_energy"):
+            experiments.append(run_experiment(f"{prefix}with_energy", args, ct_mode, include_energy=True))
 
     if not args.dry_run:
-        write_summary(output_root, experiment_dirs)
+        write_summary(output_root, experiments)
 
 
 if __name__ == "__main__":
