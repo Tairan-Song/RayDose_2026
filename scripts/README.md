@@ -61,6 +61,7 @@ Purpose:
 - load CT, dose, and dose-support mask
 - clip CT HU to `[-1000, 3000]`
 - normalize CT to `[-1, 1]`
+- optionally convert CT HU to density using `beam_parameters.json`
 - normalize dose by the sample max dose
 - crop/pad CT, dose, and mask to a fixed shape
 - save a compressed `.npz` for Dataset/model debugging
@@ -75,6 +76,7 @@ python scripts/python/preprocess_training_sample.py `
   --cp-idx 0 `
   --mask-name dose_gt_1pct `
   --target-shape "128 128 128" `
+  --ct-mode hu `
   --output-npz outputs/preprocessing_smoke/1ABB006_B0_CP000.npz
 ```
 
@@ -83,6 +85,8 @@ Current assumptions:
 - crop center is the case beam `iso_center` when it can be mapped to voxel space
 - fallback crop center is the image center
 - this script is a smoke test for one sample, not a full preprocessing pipeline
+- `--ct-mode hu` uses clipped normalized HU
+- `--ct-mode density` uses the HU-to-density table in `beam_parameters.json`
 
 ### 3. PyTorch Dataset And Baseline Smoke Test
 
@@ -108,6 +112,13 @@ Current model input:
 
 ```text
 CT crop + condition vector
+```
+
+CT crop options:
+
+```text
+--ct-mode hu       clipped HU normalized to [-1, 1]
+--ct-mode density  HU converted to density and scaled to [0, 1]
 ```
 
 The condition vector contains:
@@ -136,6 +147,7 @@ python scripts/python/train_3d_unet.py `
   --split-csv splits/photon_case_split.csv `
   --output-dir outputs/baseline_3d_unet `
   --target-shape "64 64 64" `
+  --ct-mode hu `
   --max-train-samples 32 `
   --max-val-samples 8 `
   --batch-size 1 `

@@ -35,6 +35,7 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         target_shape=args.target_shape,
         mask_name=args.mask_name,
         max_samples=max_samples,
+        ct_mode=args.ct_mode,
     )
     return DataLoader(
         dataset,
@@ -200,6 +201,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="outputs/baseline_3d_unet")
     parser.add_argument("--target-shape", default="64 64 64")
     parser.add_argument("--mask-name", default="dose_gt_1pct")
+    parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
     parser.add_argument("--max-train-samples", type=int, default=32)
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=1)

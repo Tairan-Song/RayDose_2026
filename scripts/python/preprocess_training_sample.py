@@ -28,6 +28,40 @@ def normalize_ct_hu(ct: np.ndarray, hu_min: float, hu_max: float) -> np.ndarray:
     return 2.0 * (ct - hu_min) / (hu_max - hu_min) - 1.0
 
 
+def load_hu_to_density_table(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    entries = data["hu_to_density"]["entries"]
+    hu = np.asarray([entry["hu"] for entry in entries], dtype=np.float32)
+    density = np.asarray([entry["density_g_cm3"] for entry in entries], dtype=np.float32)
+    order = np.argsort(hu)
+    return hu[order], density[order]
+
+
+def ct_to_density(ct: np.ndarray, hu: np.ndarray, density: np.ndarray) -> np.ndarray:
+    return np.interp(ct.astype(np.float32), hu, density).astype(np.float32)
+
+
+def normalize_density(density: np.ndarray, max_density: float = 4.0) -> np.ndarray:
+    density = np.clip(density.astype(np.float32), 0.0, max_density)
+    return density / max_density
+
+
+def preprocess_ct(
+    ct: np.ndarray,
+    ct_mode: str,
+    hu_min: float,
+    hu_max: float,
+    hu_density_table: tuple[np.ndarray, np.ndarray] | None = None,
+) -> np.ndarray:
+    if ct_mode == "hu":
+        return normalize_ct_hu(ct, hu_min, hu_max)
+    if ct_mode == "density":
+        if hu_density_table is None:
+            raise ValueError("hu_density_table is required when ct_mode='density'")
+        return normalize_density(ct_to_density(ct, *hu_density_table))
+    raise ValueError(f"Unsupported ct_mode: {ct_mode!r}")
+
+
 def normalize_dose(dose: np.ndarray) -> tuple[np.ndarray, float]:
     dose = dose.astype(np.float32)
     dose_max = float(dose.max())
@@ -101,7 +135,11 @@ def preprocess(args: argparse.Namespace) -> None:
     dose_img = read_mha(dose_path)
     mask_img = read_mha(mask_path)
 
-    ct = normalize_ct_hu(ct_img.array, args.hu_min, args.hu_max)
+    density_table = None
+    if args.ct_mode == "density":
+        density_table = load_hu_to_density_table(training_dir / "beam_parameters.json")
+
+    ct = preprocess_ct(ct_img.array, args.ct_mode, args.hu_min, args.hu_max, density_table)
     dose, dose_max = normalize_dose(dose_img.array)
     mask = (mask_img.array > 0).astype(np.float32)
 
@@ -141,6 +179,7 @@ def preprocess(args: argparse.Namespace) -> None:
         dose_max=np.asarray(dose_max, dtype=np.float32),
         crop_center=np.asarray(center, dtype=np.int32),
         center_source=np.asarray(center_source),
+        ct_mode=np.asarray(args.ct_mode),
     )
 
     print(
@@ -157,6 +196,8 @@ def preprocess(args: argparse.Namespace) -> None:
         "center",
         center,
         center_source,
+        "ct_mode",
+        args.ct_mode,
     )
 
 
@@ -168,6 +209,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cp-idx", type=int, required=True)
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--target-shape", default="128 128 128")
+    parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
     parser.add_argument("--hu-min", type=float, default=-1000.0)
     parser.add_argument("--hu-max", type=float, default=3000.0)
     parser.add_argument("--output-npz", default="outputs/preprocessing_smoke/sample.npz")

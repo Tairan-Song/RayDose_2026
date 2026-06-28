@@ -14,9 +14,10 @@ from torch.utils.data import Dataset
 from mha_io import read_mha
 from preprocess_training_sample import (
     crop_or_pad,
-    normalize_ct_hu,
+    load_hu_to_density_table,
     normalize_dose,
     parse_int_tuple,
+    preprocess_ct,
     voxel_index_from_physical,
 )
 
@@ -80,6 +81,7 @@ class DoseRadControlPointDataset(Dataset):
         target_shape: str | tuple[int, int, int] = "128 128 128",
         mask_name: str = "dose_gt_1pct",
         max_samples: int = 0,
+        ct_mode: str = "hu",
         hu_min: float = -1000.0,
         hu_max: float = 3000.0,
     ) -> None:
@@ -88,8 +90,12 @@ class DoseRadControlPointDataset(Dataset):
         self.split = split
         self.target_shape = parse_int_tuple(target_shape) if isinstance(target_shape, str) else target_shape
         self.mask_name = mask_name
+        self.ct_mode = ct_mode
         self.hu_min = hu_min
         self.hu_max = hu_max
+        self.hu_density_table = None
+        if ct_mode == "density":
+            self.hu_density_table = load_hu_to_density_table(self.training_dir / "beam_parameters.json")
 
         case_ids = read_split_cases(self.split_csv, split)
         samples: list[tuple[str, Path, int, int]] = []
@@ -126,7 +132,7 @@ class DoseRadControlPointDataset(Dataset):
         if center is None:
             center = tuple(int(v // 2) for v in ct_img.array.shape)
 
-        ct = normalize_ct_hu(ct_img.array, self.hu_min, self.hu_max)
+        ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
         dose, dose_max = normalize_dose(dose_img.array)
         mask = (mask_img.array > 0).astype(np.float32)
 
