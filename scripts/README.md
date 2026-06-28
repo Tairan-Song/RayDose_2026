@@ -84,7 +84,65 @@ Current assumptions:
 - fallback crop center is the image center
 - this script is a smoke test for one sample, not a full preprocessing pipeline
 
-### 3. Generate Dose-Support Labels
+### 3. PyTorch Dataset And Baseline Smoke Test
+
+Scripts:
+
+```text
+scripts/python/doserad_dataset.py
+scripts/python/model_3d_unet.py
+scripts/python/train_3d_unet_smoke.py
+```
+
+Purpose:
+
+- define one training sample as one case + beam + control point
+- load CT, dose, and dose-support mask
+- crop/pad samples to a fixed 3D shape
+- encode beam/control-point geometry as a condition vector
+- run a tiny geometry-conditioned 3D U-Net training smoke test
+
+Current model input:
+
+```text
+CT crop + condition vector
+```
+
+The condition vector contains:
+
+```text
+beam_idx, cp_idx, sin/cos gantry angle, isocenter, MLC left positions, MLC right positions
+```
+
+Current target:
+
+```text
+Dose_Bx_CPy.mha crop
+```
+
+Current loss:
+
+```text
+global L1 dose loss + masked L1 dose loss inside dose_gt_1pct
+```
+
+Smoke test:
+
+```powershell
+python scripts/python/train_3d_unet_smoke.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --split train `
+  --target-shape "32 32 32" `
+  --max-samples 2 `
+  --batch-size 1 `
+  --steps 2 `
+  --base-channels 4
+```
+
+This is a code-path test, not a performance experiment.
+
+### 4. Generate Dose-Support Labels
 
 Script:
 
@@ -132,7 +190,7 @@ python scripts/python/generate_dose_support_masks.py `
   --force
 ```
 
-### 4. Evaluate Alternative Mask Definitions
+### 5. Evaluate Alternative Mask Definitions
 
 Script:
 
@@ -156,7 +214,7 @@ python scripts/python/evaluate_mask_definitions.py `
   --max-files 2
 ```
 
-### 5. MHA IO Helper
+### 6. MHA IO Helper
 
 Script:
 
