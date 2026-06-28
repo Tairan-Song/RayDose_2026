@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from doserad_dataset import CONDITION_DIM, DoseRadControlPointDataset
+from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from model_3d_unet import GeometryConditionedUNet3D
 from preprocess_training_sample import parse_int_tuple
 
@@ -36,6 +36,7 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         mask_name=args.mask_name,
         max_samples=max_samples,
         ct_mode=args.ct_mode,
+        include_energy=args.include_energy,
     )
     return DataLoader(
         dataset,
@@ -131,7 +132,10 @@ def train(args: argparse.Namespace) -> None:
     train_loader = make_loader(args, "train", args.max_train_samples, shuffle=True)
     val_loader = make_loader(args, "val", args.max_val_samples, shuffle=False)
 
-    model = GeometryConditionedUNet3D(condition_dim=CONDITION_DIM, base_channels=args.base_channels).to(device)
+    model = GeometryConditionedUNet3D(
+        condition_dim=condition_dim(include_energy=args.include_energy),
+        base_channels=args.base_channels,
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     rows: list[dict[str, float | int]] = []
@@ -202,6 +206,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-shape", default="64 64 64")
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
+    parser.add_argument("--include-energy", action="store_true")
     parser.add_argument("--max-train-samples", type=int, default=32)
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=1)

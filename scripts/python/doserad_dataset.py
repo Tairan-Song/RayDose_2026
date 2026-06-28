@@ -23,7 +23,8 @@ from preprocess_training_sample import (
 
 
 DOSE_NAME_RE = re.compile(r"Dose_B(\d+)_CP(\d+)\.mha$")
-CONDITION_DIM = 167
+BASE_CONDITION_DIM = 167
+ENERGY_SPECTRUM_DIM = 100
 
 
 def parse_dose_name(path: Path) -> tuple[int, int]:
@@ -53,7 +54,26 @@ def find_control_point(case_data: dict, beam_idx: int, cp_idx: int) -> tuple[dic
     raise ValueError(f"Could not find B{beam_idx} CP{cp_idx:03d}")
 
 
-def geometry_condition_vector(beam: dict, cp: dict, beam_idx: int, cp_idx: int) -> np.ndarray:
+def condition_dim(include_energy: bool = False) -> int:
+    return BASE_CONDITION_DIM + (ENERGY_SPECTRUM_DIM if include_energy else 0)
+
+
+def load_energy_spectrum_weights(path: str | Path) -> np.ndarray:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    weights = np.asarray(data["photon"]["energy_spectrum"]["weight"], dtype=np.float32)
+    if weights.shape[0] != ENERGY_SPECTRUM_DIM:
+        raise ValueError(f"Expected {ENERGY_SPECTRUM_DIM} energy weights, got {weights.shape[0]}")
+    total = float(weights.sum())
+    return weights / total if total > 0 else weights
+
+
+def geometry_condition_vector(
+    beam: dict,
+    cp: dict,
+    beam_idx: int,
+    cp_idx: int,
+    energy_weights: np.ndarray | None = None,
+) -> np.ndarray:
     gantry = np.deg2rad(float(cp["gantry_angle"]))
     vector = [
         beam_idx / 2.0,
@@ -64,9 +84,12 @@ def geometry_condition_vector(beam: dict, cp: dict, beam_idx: int, cp_idx: int) 
     ]
     vector.extend(float(v) / 200.0 for v in cp["mlc_left_int_mm"])
     vector.extend(float(v) / 200.0 for v in cp["mlc_right_int_mm"])
+    if energy_weights is not None:
+        vector.extend(float(v) for v in energy_weights)
     out = np.asarray(vector, dtype=np.float32)
-    if out.shape[0] != CONDITION_DIM:
-        raise ValueError(f"Expected condition dim {CONDITION_DIM}, got {out.shape[0]}")
+    expected_dim = condition_dim(include_energy=energy_weights is not None)
+    if out.shape[0] != expected_dim:
+        raise ValueError(f"Expected condition dim {expected_dim}, got {out.shape[0]}")
     return out
 
 
@@ -82,6 +105,7 @@ class DoseRadControlPointDataset(Dataset):
         mask_name: str = "dose_gt_1pct",
         max_samples: int = 0,
         ct_mode: str = "hu",
+        include_energy: bool = False,
         hu_min: float = -1000.0,
         hu_max: float = 3000.0,
     ) -> None:
@@ -91,11 +115,15 @@ class DoseRadControlPointDataset(Dataset):
         self.target_shape = parse_int_tuple(target_shape) if isinstance(target_shape, str) else target_shape
         self.mask_name = mask_name
         self.ct_mode = ct_mode
+        self.include_energy = include_energy
         self.hu_min = hu_min
         self.hu_max = hu_max
         self.hu_density_table = None
         if ct_mode == "density":
             self.hu_density_table = load_hu_to_density_table(self.training_dir / "beam_parameters.json")
+        self.energy_weights = None
+        if include_energy:
+            self.energy_weights = load_energy_spectrum_weights(self.training_dir / "beam_parameters.json")
 
         case_ids = read_split_cases(self.split_csv, split)
         samples: list[tuple[str, Path, int, int]] = []
@@ -139,7 +167,7 @@ class DoseRadControlPointDataset(Dataset):
         ct = crop_or_pad(ct, center, self.target_shape, pad_value=-1.0)
         dose = crop_or_pad(dose, center, self.target_shape, pad_value=0.0)
         mask = crop_or_pad(mask, center, self.target_shape, pad_value=0.0)
-        condition = geometry_condition_vector(beam, cp, beam_idx, cp_idx)
+        condition = geometry_condition_vector(beam, cp, beam_idx, cp_idx, self.energy_weights)
 
         return {
             "ct": torch.from_numpy(ct[None].astype(np.float32)),

@@ -127,6 +127,17 @@ The condition vector contains:
 beam_idx, cp_idx, sin/cos gantry angle, isocenter, MLC left positions, MLC right positions
 ```
 
+Optional energy-spectrum ablation:
+
+```text
+--include-energy
+```
+
+This appends the global 100-bin photon energy-spectrum weights from
+`beam_parameters.json` to the condition vector. By default, energy is not
+included because the current dataset stores it as a global machine parameter,
+not as a per-control-point variable.
+
 Current target:
 
 ```text
@@ -148,6 +159,23 @@ python scripts/python/train_3d_unet.py `
   --output-dir outputs/baseline_3d_unet `
   --target-shape "64 64 64" `
   --ct-mode hu `
+  --max-train-samples 32 `
+  --max-val-samples 8 `
+  --batch-size 1 `
+  --epochs 5 `
+  --base-channels 8
+```
+
+With energy-spectrum conditioning:
+
+```powershell
+python scripts/python/train_3d_unet.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --output-dir outputs/baseline_3d_unet_energy `
+  --target-shape "64 64 64" `
+  --ct-mode hu `
+  --include-energy `
   --max-train-samples 32 `
   --max-val-samples 8 `
   --batch-size 1 `

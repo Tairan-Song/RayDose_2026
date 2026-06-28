@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from doserad_dataset import CONDITION_DIM, DoseRadControlPointDataset
+from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from model_3d_unet import GeometryConditionedUNet3D
 
 
@@ -28,10 +28,14 @@ def train_smoke(args: argparse.Namespace) -> None:
         mask_name=args.mask_name,
         max_samples=args.max_samples,
         ct_mode=args.ct_mode,
+        include_energy=args.include_energy,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
-    model = GeometryConditionedUNet3D(condition_dim=CONDITION_DIM, base_channels=args.base_channels).to(device)
+    model = GeometryConditionedUNet3D(
+        condition_dim=condition_dim(include_energy=args.include_energy),
+        base_channels=args.base_channels,
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     model.train()
@@ -77,6 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-shape", default="32 32 32")
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
+    parser.add_argument("--include-energy", action="store_true")
     parser.add_argument("--max-samples", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=2)
