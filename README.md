@@ -42,6 +42,7 @@ scripts/
     doserad_dataset.py
     model_3d_unet.py
     train_3d_unet.py
+    run_energy_ablation.py
     predict_3d_unet.py
     evaluate_prediction.py
     train_3d_unet_smoke.py

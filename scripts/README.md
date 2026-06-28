@@ -96,6 +96,7 @@ Scripts:
 scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
+scripts/python/run_energy_ablation.py
 scripts/python/predict_3d_unet.py
 scripts/python/evaluate_prediction.py
 scripts/python/train_3d_unet_smoke.py
@@ -210,6 +211,32 @@ python scripts/python/train_3d_unet.py `
   --batch-size 1 `
   --epochs 5 `
   --base-channels 8
+```
+
+Run matched no-energy and with-energy experiments:
+
+```powershell
+python scripts/python/run_energy_ablation.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --output-root outputs/energy_ablation `
+  --target-shape "64 64 64" `
+  --ct-mode hu `
+  --dose-mode global `
+  --global-dose-scale 1.5e-4 `
+  --max-train-samples 32 `
+  --max-val-samples 8 `
+  --batch-size 1 `
+  --epochs 5 `
+  --base-channels 8
+```
+
+This writes:
+
+```text
+outputs/energy_ablation/no_energy/
+outputs/energy_ablation/with_energy/
+outputs/energy_ablation/energy_ablation_summary.csv
 ```
 
 Outputs:
