@@ -1,6 +1,7 @@
 data/
 outputs/
 packages/
+splits/*.csv
 .tmp*/
 *.docx
 *.pdf

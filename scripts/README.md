@@ -13,7 +13,41 @@ Path:
 scripts/python/
 ```
 
-### 1. Generate Dose-Support Labels
+### 1. Create Case-Level Train/Validation Split
+
+Script:
+
+```text
+scripts/python/make_case_split.py
+```
+
+Purpose:
+
+- scan valid photon training cases
+- split by case, not by dose/control-point file
+- default split: 80% train / 20% validation
+- fixed seed for reproducibility
+
+Run:
+
+```powershell
+python scripts/python/make_case_split.py `
+  --training-dir data/photon/training `
+  --output-csv splits/photon_case_split.csv `
+  --train-fraction 0.8 `
+  --seed 20260628
+```
+
+The generated CSV has this format:
+
+```text
+case_id,split,seed,train_fraction
+```
+
+All CT, JSON, dose, and mask files from the same case must stay in the same
+split.
+
+### 2. Generate Dose-Support Labels
 
 Script:
 
@@ -61,7 +95,7 @@ python scripts/python/generate_dose_support_masks.py `
   --force
 ```
 
-### 2. Evaluate Alternative Mask Definitions
+### 3. Evaluate Alternative Mask Definitions
 
 Script:
 
@@ -85,7 +119,7 @@ python scripts/python/evaluate_mask_definitions.py `
   --max-files 2
 ```
 
-### 3. MHA IO Helper
+### 4. MHA IO Helper
 
 Script:
 
