@@ -44,6 +44,7 @@ scripts/
     train_3d_unet.py
     run_energy_ablation.py
     predict_3d_unet.py
+    predict_3d_unet_batch.py
     evaluate_prediction.py
     evaluate_checkpoint.py
     train_3d_unet_smoke.py

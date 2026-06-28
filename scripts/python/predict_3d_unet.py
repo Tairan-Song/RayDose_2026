@@ -19,6 +19,13 @@ from mha_io import read_mha, write_float_mha
 from model_3d_unet import GeometryConditionedUNet3D
 
 
+def load_checkpoint(path: str | Path) -> dict:
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
 def choose_sample_index(dataset: DoseRadControlPointDataset, case_id: str | None, beam_idx: int | None, cp_idx: int | None) -> int:
     if case_id is None:
         return 0
@@ -51,7 +58,7 @@ def insert_crop(full_shape: tuple[int, int, int], crop: np.ndarray, start: np.nd
 
 
 def predict(args: argparse.Namespace) -> None:
-    checkpoint = torch.load(args.checkpoint, map_location="cpu")
+    checkpoint = load_checkpoint(args.checkpoint)
     ckpt_args = checkpoint["args"]
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")

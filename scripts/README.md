@@ -98,6 +98,7 @@ scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
 scripts/python/run_energy_ablation.py
 scripts/python/predict_3d_unet.py
+scripts/python/predict_3d_unet_batch.py
 scripts/python/evaluate_prediction.py
 scripts/python/evaluate_checkpoint.py
 scripts/python/train_3d_unet_smoke.py
@@ -250,9 +251,9 @@ outputs/baseline_3d_unet/predictions/val_prediction_epoch_*.npz
 outputs/baseline_3d_unet/predictions/val_prediction_epoch_*_pred.mha
 ```
 
-The exported `.mha` prediction is a crop-level dose prediction with crop
-`DimSize`, `ElementSpacing`, and adjusted `Offset`. Full-volume prediction will
-require a later inference/stitching step.
+The exported `.mha` prediction from training validation is crop-level. Use
+`predict_3d_unet.py` or `predict_3d_unet_batch.py` to write full-volume MHA
+predictions on the original CT grid.
 
 Full-volume inference for one sample:
 
@@ -285,6 +286,27 @@ Inference outputs:
 The full `.mha` has the same `DimSize`, `ElementSpacing`, and `Offset` as the
 original CT. The current baseline places the predicted crop into the full
 volume and fills outside-crop voxels with zero.
+
+Full-volume inference for multiple samples:
+
+```powershell
+python scripts/python/predict_3d_unet_batch.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --split val `
+  --output-dir outputs/baseline_3d_unet_batch_inference `
+  --max-samples 64 `
+  --no-npz
+```
+
+Batch inference writes one case subdirectory per case:
+
+```text
+outputs/baseline_3d_unet_batch_inference/
+  prediction_manifest.csv
+  <case>/
+    <case>_B<beam>_CP<cp>_pred_crop.mha
+    <case>_B<beam>_CP<cp>_pred_full.mha
+```
 
 Evaluate one prediction:
 
