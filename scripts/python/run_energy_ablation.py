@@ -43,6 +43,8 @@ def build_train_command(args: argparse.Namespace, output_dir: Path, include_ener
         args.sample_strategy,
         "--sample-seed",
         str(args.sample_seed),
+        "--seed",
+        str(args.seed),
         "--batch-size",
         str(args.batch_size),
         "--epochs",
@@ -141,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
+    parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--steps-per-epoch", type=int, default=0)

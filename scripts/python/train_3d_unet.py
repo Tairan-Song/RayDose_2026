@@ -17,6 +17,20 @@ from model_3d_unet import GeometryConditionedUNet3D
 from preprocess_training_sample import parse_int_tuple
 
 
+def seed_everything(seed: int) -> None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+
+def seed_worker(worker_id: int) -> None:
+    worker_seed = (torch.initial_seed() + worker_id) % 2**32
+    np.random.seed(worker_seed)
+
+
 def masked_l1(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     denom = mask.sum().clamp_min(1.0)
     return (torch.abs(pred - target) * mask).sum() / denom
@@ -43,12 +57,16 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         dose_mode=args.dose_mode,
         global_dose_scale=args.global_dose_scale,
     )
+    generator = torch.Generator()
+    generator.manual_seed(args.seed + (0 if split == "train" else 1))
     return DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=shuffle,
         num_workers=args.num_workers,
         pin_memory=torch.cuda.is_available(),
+        worker_init_fn=seed_worker if args.num_workers > 0 else None,
+        generator=generator,
     )
 
 
@@ -157,6 +175,7 @@ def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
 
 
 def train(args: argparse.Namespace) -> None:
+    seed_everything(args.seed)
     target_shape = parse_int_tuple(args.target_shape)
     if any(dim % 4 != 0 for dim in target_shape):
         raise ValueError("--target-shape dimensions must be divisible by 4 for this U-Net")
@@ -248,6 +267,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
+    parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--steps-per-epoch", type=int, default=0)

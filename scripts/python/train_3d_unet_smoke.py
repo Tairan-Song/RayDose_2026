@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -12,12 +13,22 @@ from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from model_3d_unet import GeometryConditionedUNet3D
 
 
+def seed_everything(seed: int) -> None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+
 def masked_l1(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     denom = mask.sum().clamp_min(1.0)
     return (torch.abs(pred - target) * mask).sum() / denom
 
 
 def train_smoke(args: argparse.Namespace) -> None:
+    seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
 
     dataset = DoseRadControlPointDataset(
@@ -34,7 +45,9 @@ def train_smoke(args: argparse.Namespace) -> None:
         dose_mode=args.dose_mode,
         global_dose_scale=args.global_dose_scale,
     )
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    generator = torch.Generator()
+    generator.manual_seed(args.seed)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, generator=generator)
 
     model = GeometryConditionedUNet3D(
         condition_dim=condition_dim(include_energy=args.include_energy),
@@ -91,6 +104,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=2)
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
+    parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--steps", type=int, default=2)

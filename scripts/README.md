@@ -169,6 +169,13 @@ Sample selection for limited-size runs:
 Use `--max-train-samples 0` and `--max-val-samples 0` to use all available
 samples in the selected split.
 
+Reproducibility controls:
+
+```text
+--seed         model initialization and DataLoader shuffle seed
+--sample-seed subset selection seed when --sample-strategy random is used
+```
+
 Estimate a global scale from existing training statistics:
 
 ```powershell
