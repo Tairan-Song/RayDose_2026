@@ -133,6 +133,8 @@ def predict_batch(args: argparse.Namespace) -> None:
         target_shape=ckpt_args["target_shape"],
         mask_name=ckpt_args.get("mask_name", "dose_gt_1pct"),
         max_samples=args.max_samples,
+        sample_strategy=args.sample_strategy,
+        sample_seed=args.sample_seed,
         ct_mode=ckpt_args.get("ct_mode", "hu"),
         include_energy=include_energy,
         dose_mode=ckpt_args.get("dose_mode", "global"),
@@ -169,6 +171,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="val")
     parser.add_argument("--output-dir", default="outputs/baseline_3d_unet_batch_inference")
     parser.add_argument("--max-samples", type=int, default=8)
+    parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
+    parser.add_argument("--sample-seed", type=int, default=20260628)
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--no-npz", action="store_true")
     parser.add_argument("--cpu", action="store_true")

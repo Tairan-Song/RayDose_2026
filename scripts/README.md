@@ -158,6 +158,17 @@ Dose target scaling:
 --dose-mode sample_max  useful for debugging only; not ideal for test inference
 ```
 
+Sample selection for limited-size runs:
+
+```text
+--sample-strategy uniform  default; spread samples across cases and control points
+--sample-strategy random   deterministic random subset using --sample-seed
+--sample-strategy first    legacy behavior; take the first sorted samples
+```
+
+Use `--max-train-samples 0` and `--max-val-samples 0` to use all available
+samples in the selected split.
+
 Estimate a global scale from existing training statistics:
 
 ```powershell

@@ -27,6 +27,8 @@ def train_smoke(args: argparse.Namespace) -> None:
         target_shape=args.target_shape,
         mask_name=args.mask_name,
         max_samples=args.max_samples,
+        sample_strategy=args.sample_strategy,
+        sample_seed=args.sample_seed,
         ct_mode=args.ct_mode,
         include_energy=args.include_energy,
         dose_mode=args.dose_mode,
@@ -87,6 +89,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dose-mode", choices=("sample_max", "global", "raw"), default="global")
     parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--max-samples", type=int, default=2)
+    parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
+    parser.add_argument("--sample-seed", type=int, default=20260628)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--steps", type=int, default=2)

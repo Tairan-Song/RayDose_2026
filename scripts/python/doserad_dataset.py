@@ -67,6 +67,50 @@ def load_energy_spectrum_weights(path: str | Path) -> np.ndarray:
     return weights / total if total > 0 else weights
 
 
+def select_samples(
+    samples: list[tuple[str, Path, int, int]],
+    max_samples: int,
+    strategy: str = "uniform",
+    seed: int = 20260628,
+) -> list[tuple[str, Path, int, int]]:
+    if max_samples <= 0 or max_samples >= len(samples):
+        return samples
+    if strategy == "first":
+        return samples[:max_samples]
+    if strategy == "uniform":
+        case_groups: dict[str, list[tuple[str, Path, int, int]]] = {}
+        for sample in samples:
+            case_groups.setdefault(sample[0], []).append(sample)
+
+        groups = list(case_groups.values())
+        selected: list[tuple[str, Path, int, int]] = []
+        selected_keys: set[tuple[str, int, int]] = set()
+        for idx in range(max_samples):
+            case_idx = min(int(idx * len(groups) / max_samples), len(groups) - 1)
+            group = groups[case_idx]
+            fraction = (idx * 0.6180339887498949) % 1.0
+            sample_idx = int(fraction * len(group))
+            candidate = group[min(sample_idx, len(group) - 1)]
+            key = (candidate[0], candidate[2], candidate[3])
+
+            if key in selected_keys:
+                for fallback in group:
+                    fallback_key = (fallback[0], fallback[2], fallback[3])
+                    if fallback_key not in selected_keys:
+                        candidate = fallback
+                        key = fallback_key
+                        break
+
+            selected.append(candidate)
+            selected_keys.add(key)
+        return selected
+    if strategy == "random":
+        rng = np.random.default_rng(seed)
+        indices = np.sort(rng.choice(len(samples), size=max_samples, replace=False))
+        return [samples[int(idx)] for idx in indices]
+    raise ValueError(f"Unknown sample selection strategy: {strategy}")
+
+
 def crop_start(center: tuple[int, int, int], target_shape: tuple[int, int, int]) -> np.ndarray:
     return np.asarray([center[axis] - target_shape[axis] // 2 for axis in range(3)], dtype=np.float32)
 
@@ -116,6 +160,8 @@ class DoseRadControlPointDataset(Dataset):
         target_shape: str | tuple[int, int, int] = "128 128 128",
         mask_name: str = "dose_gt_1pct",
         max_samples: int = 0,
+        sample_strategy: str = "uniform",
+        sample_seed: int = 20260628,
         ct_mode: str = "hu",
         include_energy: bool = False,
         dose_mode: str = "sample_max",
@@ -149,7 +195,7 @@ class DoseRadControlPointDataset(Dataset):
                 beam_idx, cp_idx = parse_dose_name(dose_path)
                 samples.append((case_id, dose_path, beam_idx, cp_idx))
 
-        self.samples = samples[:max_samples] if max_samples > 0 else samples
+        self.samples = select_samples(samples, max_samples, sample_strategy, sample_seed)
         if not self.samples:
             raise RuntimeError(f"No samples found for split={split!r}")
 

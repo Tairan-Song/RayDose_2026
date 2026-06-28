@@ -36,6 +36,8 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         target_shape=args.target_shape,
         mask_name=args.mask_name,
         max_samples=max_samples,
+        sample_strategy=args.sample_strategy,
+        sample_seed=args.sample_seed,
         ct_mode=args.ct_mode,
         include_energy=args.include_energy,
         dose_mode=args.dose_mode,
@@ -244,6 +246,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--max-train-samples", type=int, default=32)
     parser.add_argument("--max-val-samples", type=int, default=8)
+    parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
+    parser.add_argument("--sample-seed", type=int, default=20260628)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--steps-per-epoch", type=int, default=0)
