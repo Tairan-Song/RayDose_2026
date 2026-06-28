@@ -97,6 +97,7 @@ scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
 scripts/python/run_energy_ablation.py
+scripts/python/run_pipeline_smoke.py
 scripts/python/predict_3d_unet.py
 scripts/python/predict_3d_unet_batch.py
 scripts/python/evaluate_prediction.py
@@ -402,6 +403,26 @@ python scripts/python/train_3d_unet_smoke.py `
 ```
 
 The smoke test is a code-path test, not a performance experiment.
+
+End-to-end pipeline smoke test:
+
+```powershell
+python scripts/python/run_pipeline_smoke.py `
+  --training-dir data/photon/training `
+  --output-dir outputs/pipeline_smoke
+```
+
+This runs:
+
+```text
+case split -> preprocessing -> 1-step training -> checkpoint evaluation -> batch full-volume inference
+```
+
+Expected final line:
+
+```text
+pipeline_smoke_passed output_dir=outputs/pipeline_smoke
+```
 
 ### 4. Generate Dose-Support Labels
 

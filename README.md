@@ -43,6 +43,7 @@ scripts/
     model_3d_unet.py
     train_3d_unet.py
     run_energy_ablation.py
+    run_pipeline_smoke.py
     predict_3d_unet.py
     predict_3d_unet_batch.py
     evaluate_prediction.py
