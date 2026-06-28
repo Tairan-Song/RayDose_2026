@@ -177,7 +177,8 @@ class DoseRadControlPointDataset(Dataset):
             center = tuple(int(v // 2) for v in ct_img.array.shape)
 
         spacing = spacing_from_meta(ct_img.meta)
-        crop_offset = offset_from_meta(ct_img.meta) + crop_start(center, self.target_shape) * spacing
+        start = crop_start(center, self.target_shape)
+        crop_offset = offset_from_meta(ct_img.meta) + start * spacing
 
         ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
         dose, dose_max, dose_scale = scale_dose(dose_img.array, self.dose_mode, self.global_dose_scale)
@@ -196,6 +197,8 @@ class DoseRadControlPointDataset(Dataset):
             "dose_max": torch.tensor(dose_max, dtype=torch.float32),
             "dose_scale": torch.tensor(dose_scale, dtype=torch.float32),
             "crop_offset": torch.from_numpy(crop_offset.astype(np.float32)),
+            "crop_start": torch.from_numpy(start.astype(np.int32)),
+            "original_shape": torch.tensor(ct_img.array.shape, dtype=torch.int32),
             "element_spacing": torch.from_numpy(spacing.astype(np.float32)),
             "case_id": case_id,
             "beam_idx": beam_idx,

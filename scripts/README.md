@@ -96,6 +96,7 @@ Scripts:
 scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
+scripts/python/predict_3d_unet.py
 scripts/python/train_3d_unet_smoke.py
 scripts/python/estimate_dose_scale.py
 ```
@@ -223,6 +224,38 @@ outputs/baseline_3d_unet/predictions/val_prediction_epoch_*_pred.mha
 The exported `.mha` prediction is a crop-level dose prediction with crop
 `DimSize`, `ElementSpacing`, and adjusted `Offset`. Full-volume prediction will
 require a later inference/stitching step.
+
+Full-volume inference for one sample:
+
+```powershell
+python scripts/python/predict_3d_unet.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --split val `
+  --output-dir outputs/baseline_3d_unet_inference
+```
+
+Optional specific sample:
+
+```powershell
+python scripts/python/predict_3d_unet.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --case-id 1ABB006 `
+  --beam-idx 0 `
+  --cp-idx 0 `
+  --output-dir outputs/baseline_3d_unet_inference
+```
+
+Inference outputs:
+
+```text
+<case>_B<beam>_CP<cp>_pred_crop.mha
+<case>_B<beam>_CP<cp>_pred_full.mha
+<case>_B<beam>_CP<cp>_pred.npz
+```
+
+The full `.mha` has the same `DimSize`, `ElementSpacing`, and `Offset` as the
+original CT. The current baseline places the predicted crop into the full
+volume and fills outside-crop voxels with zero.
 
 Tiny smoke test:
 
