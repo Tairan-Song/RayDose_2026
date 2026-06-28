@@ -97,6 +97,7 @@ scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
 scripts/python/predict_3d_unet.py
+scripts/python/evaluate_prediction.py
 scripts/python/train_3d_unet_smoke.py
 scripts/python/estimate_dose_scale.py
 ```
@@ -256,6 +257,22 @@ Inference outputs:
 The full `.mha` has the same `DimSize`, `ElementSpacing`, and `Offset` as the
 original CT. The current baseline places the predicted crop into the full
 volume and fills outside-crop voxels with zero.
+
+Evaluate one prediction:
+
+```powershell
+python scripts/python/evaluate_prediction.py `
+  --prediction outputs/baseline_3d_unet_inference/1ABB006_B0_CP000_pred_full.mha `
+  --target data/photon/training/1ABB006/dose/Dose_B0_CP000.mha `
+  --mask data/photon/training/1ABB006/label_masks/dose_gt_1pct/Dose_B0_CP000_mask.mha `
+  --output-csv outputs/evaluation/1ABB006_B0_CP000_metrics.csv
+```
+
+Metrics:
+
+```text
+MAE, RMSE, max absolute error, masked MAE, masked RMSE, masked max absolute error
+```
 
 Tiny smoke test:
 
