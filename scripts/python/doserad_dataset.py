@@ -15,9 +15,9 @@ from mha_io import read_mha
 from preprocess_training_sample import (
     crop_or_pad,
     load_hu_to_density_table,
-    normalize_dose,
     parse_int_tuple,
     preprocess_ct,
+    scale_dose,
     voxel_index_from_physical,
 )
 
@@ -118,6 +118,8 @@ class DoseRadControlPointDataset(Dataset):
         max_samples: int = 0,
         ct_mode: str = "hu",
         include_energy: bool = False,
+        dose_mode: str = "sample_max",
+        global_dose_scale: float = 1.5e-4,
         hu_min: float = -1000.0,
         hu_max: float = 3000.0,
     ) -> None:
@@ -128,6 +130,8 @@ class DoseRadControlPointDataset(Dataset):
         self.mask_name = mask_name
         self.ct_mode = ct_mode
         self.include_energy = include_energy
+        self.dose_mode = dose_mode
+        self.global_dose_scale = global_dose_scale
         self.hu_min = hu_min
         self.hu_max = hu_max
         self.hu_density_table = None
@@ -176,7 +180,7 @@ class DoseRadControlPointDataset(Dataset):
         crop_offset = offset_from_meta(ct_img.meta) + crop_start(center, self.target_shape) * spacing
 
         ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
-        dose, dose_max = normalize_dose(dose_img.array)
+        dose, dose_max, dose_scale = scale_dose(dose_img.array, self.dose_mode, self.global_dose_scale)
         mask = (mask_img.array > 0).astype(np.float32)
 
         ct = crop_or_pad(ct, center, self.target_shape, pad_value=-1.0)
@@ -190,6 +194,7 @@ class DoseRadControlPointDataset(Dataset):
             "loss_mask": torch.from_numpy(mask[None].astype(np.float32)),
             "condition": torch.from_numpy(condition),
             "dose_max": torch.tensor(dose_max, dtype=torch.float32),
+            "dose_scale": torch.tensor(dose_scale, dtype=torch.float32),
             "crop_offset": torch.from_numpy(crop_offset.astype(np.float32)),
             "element_spacing": torch.from_numpy(spacing.astype(np.float32)),
             "case_id": case_id,

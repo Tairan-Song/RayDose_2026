@@ -97,6 +97,7 @@ scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
 scripts/python/train_3d_unet.py
 scripts/python/train_3d_unet_smoke.py
+scripts/python/estimate_dose_scale.py
 ```
 
 Purpose:
@@ -144,6 +145,28 @@ Current target:
 Dose_Bx_CPy.mha crop
 ```
 
+Dose target scaling:
+
+```text
+--dose-mode global      recommended for direct dose prediction
+--global-dose-scale     constant used to scale dose targets
+--dose-mode sample_max  useful for debugging only; not ideal for test inference
+```
+
+Estimate a global scale from existing training statistics:
+
+```powershell
+python scripts/python/estimate_dose_scale.py `
+  --stats-csv data/photon/training/dose_mask_stats_gt_1pct.csv
+```
+
+Current local estimate:
+
+```text
+max dose_max ~= 1.49e-4
+recommended --global-dose-scale 1.5e-4
+```
+
 Current loss:
 
 ```text
@@ -159,6 +182,8 @@ python scripts/python/train_3d_unet.py `
   --output-dir outputs/baseline_3d_unet `
   --target-shape "64 64 64" `
   --ct-mode hu `
+  --dose-mode global `
+  --global-dose-scale 1.5e-4 `
   --max-train-samples 32 `
   --max-val-samples 8 `
   --batch-size 1 `
@@ -176,6 +201,8 @@ python scripts/python/train_3d_unet.py `
   --target-shape "64 64 64" `
   --ct-mode hu `
   --include-energy `
+  --dose-mode global `
+  --global-dose-scale 1.5e-4 `
   --max-train-samples 32 `
   --max-val-samples 8 `
   --batch-size 1 `

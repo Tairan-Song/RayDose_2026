@@ -29,6 +29,8 @@ def train_smoke(args: argparse.Namespace) -> None:
         max_samples=args.max_samples,
         ct_mode=args.ct_mode,
         include_energy=args.include_energy,
+        dose_mode=args.dose_mode,
+        global_dose_scale=args.global_dose_scale,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
@@ -82,6 +84,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
     parser.add_argument("--include-energy", action="store_true")
+    parser.add_argument("--dose-mode", choices=("sample_max", "global", "raw"), default="global")
+    parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--max-samples", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=2)

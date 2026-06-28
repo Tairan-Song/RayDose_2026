@@ -70,6 +70,22 @@ def normalize_dose(dose: np.ndarray) -> tuple[np.ndarray, float]:
     return dose / dose_max, dose_max
 
 
+def scale_dose(dose: np.ndarray, mode: str, global_scale: float) -> tuple[np.ndarray, float, float]:
+    dose = dose.astype(np.float32)
+    dose_max = float(dose.max())
+    if mode == "sample_max":
+        scale = dose_max if dose_max > 0 else 1.0
+    elif mode == "global":
+        if global_scale <= 0:
+            raise ValueError("--global-dose-scale must be positive when dose mode is global")
+        scale = global_scale
+    elif mode == "raw":
+        scale = 1.0
+    else:
+        raise ValueError(f"Unsupported dose mode: {mode!r}")
+    return dose / scale, dose_max, float(scale)
+
+
 def parse_int_tuple(text: str) -> tuple[int, int, int]:
     values = tuple(int(v) for v in text.replace(",", " ").split())
     if len(values) != 3:
@@ -140,7 +156,7 @@ def preprocess(args: argparse.Namespace) -> None:
         density_table = load_hu_to_density_table(training_dir / "beam_parameters.json")
 
     ct = preprocess_ct(ct_img.array, args.ct_mode, args.hu_min, args.hu_max, density_table)
-    dose, dose_max = normalize_dose(dose_img.array)
+    dose, dose_max, dose_scale = scale_dose(dose_img.array, args.dose_mode, args.global_dose_scale)
     mask = (mask_img.array > 0).astype(np.float32)
 
     target_shape = parse_int_tuple(args.target_shape)
@@ -177,6 +193,7 @@ def preprocess(args: argparse.Namespace) -> None:
         mlc_left=np.asarray(cp["mlc_left_int_mm"], dtype=np.float32),
         mlc_right=np.asarray(cp["mlc_right_int_mm"], dtype=np.float32),
         dose_max=np.asarray(dose_max, dtype=np.float32),
+        dose_scale=np.asarray(dose_scale, dtype=np.float32),
         crop_center=np.asarray(center, dtype=np.int32),
         center_source=np.asarray(center_source),
         ct_mode=np.asarray(args.ct_mode),
@@ -193,6 +210,8 @@ def preprocess(args: argparse.Namespace) -> None:
         mask_crop.shape,
         "dose_max",
         dose_max,
+        "dose_scale",
+        dose_scale,
         "center",
         center,
         center_source,
@@ -210,6 +229,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--target-shape", default="128 128 128")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
+    parser.add_argument("--dose-mode", choices=("sample_max", "global", "raw"), default="sample_max")
+    parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--hu-min", type=float, default=-1000.0)
     parser.add_argument("--hu-max", type=float, default=3000.0)
     parser.add_argument("--output-npz", default="outputs/preprocessing_smoke/sample.npz")

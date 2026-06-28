@@ -38,6 +38,8 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         max_samples=max_samples,
         ct_mode=args.ct_mode,
         include_energy=args.include_energy,
+        dose_mode=args.dose_mode,
+        global_dose_scale=args.global_dose_scale,
     )
     return DataLoader(
         dataset,
@@ -80,10 +82,11 @@ def run_validation(
             if export_path is not None and not exported:
                 export_path.parent.mkdir(parents=True, exist_ok=True)
                 dose_max = batch["dose_max"][0].detach().cpu().numpy().astype(np.float32)
+                dose_scale = batch["dose_scale"][0].detach().cpu().numpy().astype(np.float32)
                 pred_norm = pred[0, 0].detach().cpu().numpy().astype(np.float32)
                 dose_norm = dose[0, 0].detach().cpu().numpy().astype(np.float32)
-                pred_abs = pred_norm * dose_max
-                dose_abs = dose_norm * dose_max
+                pred_abs = pred_norm * dose_scale
+                dose_abs = dose_norm * dose_scale
                 np.savez_compressed(
                     export_path,
                     pred=pred_norm,
@@ -92,6 +95,7 @@ def run_validation(
                     dose_abs=dose_abs,
                     loss_mask=mask[0, 0].detach().cpu().numpy().astype(np.float32),
                     dose_max=dose_max,
+                    dose_scale=dose_scale,
                     crop_offset=batch["crop_offset"][0].detach().cpu().numpy().astype(np.float32),
                     element_spacing=batch["element_spacing"][0].detach().cpu().numpy().astype(np.float32),
                     case_id=np.asarray(batch["case_id"][0]),
@@ -236,6 +240,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-name", default="dose_gt_1pct")
     parser.add_argument("--ct-mode", choices=("hu", "density"), default="hu")
     parser.add_argument("--include-energy", action="store_true")
+    parser.add_argument("--dose-mode", choices=("sample_max", "global", "raw"), default="global")
+    parser.add_argument("--global-dose-scale", type=float, default=1.5e-4)
     parser.add_argument("--max-train-samples", type=int, default=32)
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=1)
