@@ -99,6 +99,7 @@ scripts/python/train_3d_unet.py
 scripts/python/run_energy_ablation.py
 scripts/python/predict_3d_unet.py
 scripts/python/evaluate_prediction.py
+scripts/python/evaluate_checkpoint.py
 scripts/python/train_3d_unet_smoke.py
 scripts/python/estimate_dose_scale.py
 ```
@@ -299,6 +300,23 @@ Metrics:
 
 ```text
 MAE, RMSE, max absolute error, masked MAE, masked RMSE, masked max absolute error
+```
+
+Evaluate a checkpoint on multiple validation samples:
+
+```powershell
+python scripts/python/evaluate_checkpoint.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --split val `
+  --output-dir outputs/checkpoint_evaluation `
+  --max-samples 64
+```
+
+This writes:
+
+```text
+outputs/checkpoint_evaluation/per_sample_metrics.csv
+outputs/checkpoint_evaluation/summary_metrics.csv
 ```
 
 Tiny smoke test:
