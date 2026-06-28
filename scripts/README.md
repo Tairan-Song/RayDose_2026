@@ -190,7 +190,12 @@ outputs/baseline_3d_unet/metrics.csv
 outputs/baseline_3d_unet/checkpoints/best.pt
 outputs/baseline_3d_unet/checkpoints/last.pt
 outputs/baseline_3d_unet/predictions/val_prediction_epoch_*.npz
+outputs/baseline_3d_unet/predictions/val_prediction_epoch_*_pred.mha
 ```
+
+The exported `.mha` prediction is a crop-level dose prediction with crop
+`DimSize`, `ElementSpacing`, and adjusted `Offset`. Full-volume prediction will
+require a later inference/stitching step.
 
 Tiny smoke test:
 

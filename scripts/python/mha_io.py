@@ -123,3 +123,58 @@ def write_mask_mha(path: str | Path, mask: np.ndarray, reference_meta: dict[str,
     )
 
     path.write_bytes(("\n".join(lines) + "\n").encode("ascii") + compressed)
+
+
+def write_float_mha(
+    path: str | Path,
+    array: np.ndarray,
+    reference_meta: dict[str, str],
+    offset: np.ndarray | None = None,
+    dim_size: tuple[int, int, int] | None = None,
+) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    array = np.asarray(array, dtype=np.float32)
+    compressed = zlib.compress(array.ravel(order="C").tobytes(), level=6)
+
+    meta = dict(reference_meta)
+    if offset is not None:
+        meta["Offset"] = " ".join(f"{float(v):.6g}" for v in offset)
+    if dim_size is not None:
+        meta["DimSize"] = " ".join(str(int(v)) for v in dim_size)
+
+    header_keys = [
+        "ObjectType",
+        "NDims",
+        "BinaryData",
+        "BinaryDataByteOrderMSB",
+        "TransformMatrix",
+        "Offset",
+        "CenterOfRotation",
+        "AnatomicalOrientation",
+        "ElementSpacing",
+        "DimSize",
+    ]
+    lines = []
+    for key in header_keys:
+        if key in meta:
+            lines.append(f"{key} = {meta[key]}")
+    if "ObjectType" not in meta:
+        lines.append("ObjectType = Image")
+    if "NDims" not in meta:
+        lines.append("NDims = 3")
+    if "BinaryData" not in meta:
+        lines.append("BinaryData = True")
+    if "BinaryDataByteOrderMSB" not in meta:
+        lines.append("BinaryDataByteOrderMSB = False")
+    lines.extend(
+        [
+            "CompressedData = True",
+            f"CompressedDataSize = {len(compressed)}",
+            "ElementType = MET_FLOAT",
+            "ElementDataFile = LOCAL",
+        ]
+    )
+
+    path.write_bytes(("\n".join(lines) + "\n").encode("ascii") + compressed)

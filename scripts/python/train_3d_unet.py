@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from doserad_dataset import DoseRadControlPointDataset, condition_dim
+from mha_io import write_float_mha
 from model_3d_unet import GeometryConditionedUNet3D
 from preprocess_training_sample import parse_int_tuple
 
@@ -78,15 +79,43 @@ def run_validation(
 
             if export_path is not None and not exported:
                 export_path.parent.mkdir(parents=True, exist_ok=True)
+                dose_max = batch["dose_max"][0].detach().cpu().numpy().astype(np.float32)
+                pred_norm = pred[0, 0].detach().cpu().numpy().astype(np.float32)
+                dose_norm = dose[0, 0].detach().cpu().numpy().astype(np.float32)
+                pred_abs = pred_norm * dose_max
+                dose_abs = dose_norm * dose_max
                 np.savez_compressed(
                     export_path,
-                    pred=pred[0, 0].detach().cpu().numpy().astype(np.float32),
-                    dose=dose[0, 0].detach().cpu().numpy().astype(np.float32),
+                    pred=pred_norm,
+                    dose=dose_norm,
+                    pred_abs=pred_abs,
+                    dose_abs=dose_abs,
                     loss_mask=mask[0, 0].detach().cpu().numpy().astype(np.float32),
-                    dose_max=batch["dose_max"][0].detach().cpu().numpy().astype(np.float32),
+                    dose_max=dose_max,
+                    crop_offset=batch["crop_offset"][0].detach().cpu().numpy().astype(np.float32),
+                    element_spacing=batch["element_spacing"][0].detach().cpu().numpy().astype(np.float32),
                     case_id=np.asarray(batch["case_id"][0]),
                     beam_idx=np.asarray(int(batch["beam_idx"][0])),
                     cp_idx=np.asarray(int(batch["cp_idx"][0])),
+                )
+                mha_meta = {
+                    "ObjectType": "Image",
+                    "NDims": "3",
+                    "BinaryData": "True",
+                    "BinaryDataByteOrderMSB": "False",
+                    "TransformMatrix": "1 0 0 0 1 0 0 0 1",
+                    "Offset": " ".join(f"{float(v):.6g}" for v in batch["crop_offset"][0].detach().cpu().numpy()),
+                    "CenterOfRotation": "0 0 0",
+                    "AnatomicalOrientation": "RAI",
+                    "ElementSpacing": " ".join(f"{float(v):.6g}" for v in batch["element_spacing"][0].detach().cpu().numpy()),
+                    "DimSize": " ".join(str(int(v)) for v in pred_abs.shape),
+                }
+                write_float_mha(
+                    export_path.with_name(export_path.stem + "_pred.mha"),
+                    pred_abs,
+                    mha_meta,
+                    offset=batch["crop_offset"][0].detach().cpu().numpy(),
+                    dim_size=tuple(int(v) for v in pred_abs.shape),
                 )
                 exported = True
 

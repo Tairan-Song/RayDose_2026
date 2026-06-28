@@ -67,6 +67,18 @@ def load_energy_spectrum_weights(path: str | Path) -> np.ndarray:
     return weights / total if total > 0 else weights
 
 
+def crop_start(center: tuple[int, int, int], target_shape: tuple[int, int, int]) -> np.ndarray:
+    return np.asarray([center[axis] - target_shape[axis] // 2 for axis in range(3)], dtype=np.float32)
+
+
+def spacing_from_meta(meta: dict[str, str]) -> np.ndarray:
+    return np.asarray([float(v) for v in meta["ElementSpacing"].split()], dtype=np.float32)
+
+
+def offset_from_meta(meta: dict[str, str]) -> np.ndarray:
+    return np.asarray([float(v) for v in meta["Offset"].split()], dtype=np.float32)
+
+
 def geometry_condition_vector(
     beam: dict,
     cp: dict,
@@ -160,6 +172,9 @@ class DoseRadControlPointDataset(Dataset):
         if center is None:
             center = tuple(int(v // 2) for v in ct_img.array.shape)
 
+        spacing = spacing_from_meta(ct_img.meta)
+        crop_offset = offset_from_meta(ct_img.meta) + crop_start(center, self.target_shape) * spacing
+
         ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
         dose, dose_max = normalize_dose(dose_img.array)
         mask = (mask_img.array > 0).astype(np.float32)
@@ -175,6 +190,8 @@ class DoseRadControlPointDataset(Dataset):
             "loss_mask": torch.from_numpy(mask[None].astype(np.float32)),
             "condition": torch.from_numpy(condition),
             "dose_max": torch.tensor(dose_max, dtype=torch.float32),
+            "crop_offset": torch.from_numpy(crop_offset.astype(np.float32)),
+            "element_spacing": torch.from_numpy(spacing.astype(np.float32)),
             "case_id": case_id,
             "beam_idx": beam_idx,
             "cp_idx": cp_idx,
