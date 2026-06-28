@@ -91,6 +91,7 @@ Scripts:
 ```text
 scripts/python/doserad_dataset.py
 scripts/python/model_3d_unet.py
+scripts/python/train_3d_unet.py
 scripts/python/train_3d_unet_smoke.py
 ```
 
@@ -100,7 +101,8 @@ Purpose:
 - load CT, dose, and dose-support mask
 - crop/pad samples to a fixed 3D shape
 - encode beam/control-point geometry as a condition vector
-- run a tiny geometry-conditioned 3D U-Net training smoke test
+- train a geometry-conditioned 3D U-Net baseline
+- run a tiny code-path smoke test
 
 Current model input:
 
@@ -126,7 +128,31 @@ Current loss:
 global L1 dose loss + masked L1 dose loss inside dose_gt_1pct
 ```
 
-Smoke test:
+Baseline train/validation run:
+
+```powershell
+python scripts/python/train_3d_unet.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --output-dir outputs/baseline_3d_unet `
+  --target-shape "64 64 64" `
+  --max-train-samples 32 `
+  --max-val-samples 8 `
+  --batch-size 1 `
+  --epochs 5 `
+  --base-channels 8
+```
+
+Outputs:
+
+```text
+outputs/baseline_3d_unet/metrics.csv
+outputs/baseline_3d_unet/checkpoints/best.pt
+outputs/baseline_3d_unet/checkpoints/last.pt
+outputs/baseline_3d_unet/predictions/val_prediction_epoch_*.npz
+```
+
+Tiny smoke test:
 
 ```powershell
 python scripts/python/train_3d_unet_smoke.py `
@@ -140,7 +166,7 @@ python scripts/python/train_3d_unet_smoke.py `
   --base-channels 4
 ```
 
-This is a code-path test, not a performance experiment.
+The smoke test is a code-path test, not a performance experiment.
 
 ### 4. Generate Dose-Support Labels
 

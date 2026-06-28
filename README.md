@@ -41,6 +41,7 @@ scripts/
     preprocess_training_sample.py
     doserad_dataset.py
     model_3d_unet.py
+    train_3d_unet.py
     train_3d_unet_smoke.py
     generate_dose_support_masks.py
     evaluate_mask_definitions.py
