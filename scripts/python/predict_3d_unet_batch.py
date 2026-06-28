@@ -53,6 +53,7 @@ def predict_sample(
     output_dir: Path,
     sample_index: int,
     save_npz: bool,
+    filename_style: str,
 ) -> dict[str, object]:
     with torch.no_grad():
         ct = sample["ct"][None].to(device)
@@ -73,9 +74,16 @@ def predict_sample(
     sample_dir = output_dir / case_id
     sample_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{case_id}_B{beam_idx}_CP{cp_idx:03d}"
-    crop_path = sample_dir / f"{stem}_pred_crop.mha"
-    full_path = sample_dir / f"{stem}_pred_full.mha"
-    npz_path = sample_dir / f"{stem}_pred.npz"
+    if filename_style == "dose":
+        crop_path = sample_dir / f"Dose_B{beam_idx}_CP{cp_idx:03d}_crop.mha"
+        full_path = sample_dir / f"Dose_B{beam_idx}_CP{cp_idx:03d}.mha"
+        npz_path = sample_dir / f"Dose_B{beam_idx}_CP{cp_idx:03d}.npz"
+    elif filename_style == "pred":
+        crop_path = sample_dir / f"{stem}_pred_crop.mha"
+        full_path = sample_dir / f"{stem}_pred_full.mha"
+        npz_path = sample_dir / f"{stem}_pred.npz"
+    else:
+        raise ValueError(f"Unsupported filename style: {filename_style}")
 
     crop_meta = dict(ct_img.meta)
     crop_meta["Offset"] = " ".join(f"{float(v):.6g}" for v in sample["crop_offset"].numpy())
@@ -146,7 +154,16 @@ def predict_batch(args: argparse.Namespace) -> None:
     rows: list[dict[str, object]] = []
     for idx in range(len(dataset)):
         sample = dataset[idx]
-        row = predict_sample(sample, model, device, training_dir, output_dir, idx, save_npz=not args.no_npz)
+        row = predict_sample(
+            sample,
+            model,
+            device,
+            training_dir,
+            output_dir,
+            idx,
+            save_npz=not args.no_npz,
+            filename_style=args.filename_style,
+        )
         rows.append(row)
         if args.print_every > 0 and (idx + 1) % args.print_every == 0:
             print(
@@ -173,6 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-samples", type=int, default=8)
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
+    parser.add_argument("--filename-style", choices=("pred", "dose"), default="pred")
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--no-npz", action="store_true")
     parser.add_argument("--cpu", action="store_true")

@@ -342,6 +342,7 @@ python scripts/python/predict_3d_unet_batch.py `
   --split val `
   --output-dir outputs/baseline_3d_unet_batch_inference `
   --max-samples 64 `
+  --filename-style pred `
   --no-npz
 ```
 
@@ -353,6 +354,24 @@ outputs/baseline_3d_unet_batch_inference/
   <case>/
     <case>_B<beam>_CP<cp>_pred_crop.mha
     <case>_B<beam>_CP<cp>_pred_full.mha
+```
+
+Use task-style dose filenames:
+
+```powershell
+python scripts/python/predict_3d_unet_batch.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --split val `
+  --output-dir outputs/baseline_3d_unet_dose_names `
+  --max-samples 64 `
+  --filename-style dose `
+  --no-npz
+```
+
+This writes full-volume predictions named:
+
+```text
+<case>/Dose_B<beam>_CP<cp>.mha
 ```
 
 Evaluate one prediction:
