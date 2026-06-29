@@ -160,12 +160,32 @@ def export_command(args: argparse.Namespace, python_exe: str, checkpoint: Path, 
     return cmd
 
 
+def exported_eval_command(args: argparse.Namespace, python_exe: str, export_dir: Path, exported_eval_dir: Path) -> list[str]:
+    return [
+        python_exe,
+        script_path("evaluate_exported_predictions.py"),
+        "--manifest-csv",
+        str(export_dir / "prediction_manifest.csv"),
+        "--training-dir",
+        args.training_dir,
+        "--mask-name",
+        args.mask_name,
+        "--output-dir",
+        str(exported_eval_dir),
+        "--max-samples",
+        str(args.export_eval_samples),
+        "--print-every",
+        str(args.print_every),
+    ]
+
+
 def run_baseline(args: argparse.Namespace) -> None:
     python_exe = args.python_exe or sys.executable
     output_dir = Path(args.output_dir)
     train_dir = output_dir / "train"
     eval_dir = output_dir / "evaluate"
     export_dir = output_dir / "dose_predictions"
+    exported_eval_dir = output_dir / "evaluate_exported"
     checkpoint = train_dir / "checkpoints" / "best.pt"
     split_csv = Path(args.split_csv)
     args.resolved_split_csv = split_csv
@@ -178,12 +198,16 @@ def run_baseline(args: argparse.Namespace) -> None:
     run_command(train_command(args, python_exe, train_dir), args.dry_run)
     run_command(evaluate_command(args, python_exe, checkpoint, eval_dir), args.dry_run)
     run_command(export_command(args, python_exe, checkpoint, export_dir), args.dry_run)
+    if not args.skip_export_eval:
+        run_command(exported_eval_command(args, python_exe, export_dir, exported_eval_dir), args.dry_run)
 
     if not args.dry_run:
         require_path(checkpoint, "best checkpoint")
         require_path(train_dir / "metrics.csv", "training metrics CSV")
         require_path(eval_dir / "summary_metrics.csv", "evaluation summary CSV")
         require_path(export_dir / "prediction_manifest.csv", "prediction manifest")
+        if not args.skip_export_eval:
+            require_path(exported_eval_dir / "exported_prediction_summary.csv", "exported prediction summary CSV")
         print(f"baseline_experiment_done output_dir={output_dir}", flush=True)
 
 
@@ -207,6 +231,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-samples", type=int, default=8)
     parser.add_argument("--eval-samples", type=int, default=8)
     parser.add_argument("--export-samples", type=int, default=8)
+    parser.add_argument("--export-eval-samples", type=int, default=0)
     parser.add_argument("--eval-split", default="val")
     parser.add_argument("--export-split", default="val")
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
@@ -226,6 +251,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-sliding-windows", type=int, default=0)
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--save-npz", action="store_true")
+    parser.add_argument("--skip-export-eval", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()

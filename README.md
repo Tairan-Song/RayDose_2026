@@ -50,6 +50,7 @@ scripts/
     predict_3d_unet_batch.py
     evaluate_prediction.py
     evaluate_checkpoint.py
+    evaluate_exported_predictions.py
     train_3d_unet_smoke.py
     estimate_dose_scale.py
     generate_dose_support_masks.py

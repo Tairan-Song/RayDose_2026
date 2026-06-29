@@ -142,6 +142,7 @@ scripts/python/predict_3d_unet.py
 scripts/python/predict_3d_unet_batch.py
 scripts/python/evaluate_prediction.py
 scripts/python/evaluate_checkpoint.py
+scripts/python/evaluate_exported_predictions.py
 scripts/python/train_3d_unet_smoke.py
 scripts/python/estimate_dose_scale.py
 ```
@@ -283,6 +284,7 @@ This writes:
 outputs/baseline_experiment/train/
 outputs/baseline_experiment/evaluate/
 outputs/baseline_experiment/dose_predictions/
+outputs/baseline_experiment/evaluate_exported/
 ```
 
 With energy-spectrum conditioning:
@@ -497,6 +499,23 @@ This writes:
 ```text
 outputs/checkpoint_evaluation/per_sample_metrics.csv
 outputs/checkpoint_evaluation/summary_metrics.csv
+```
+
+Evaluate exported full-volume predictions from a manifest:
+
+```powershell
+python scripts/python/evaluate_exported_predictions.py `
+  --manifest-csv outputs/baseline_experiment/dose_predictions/prediction_manifest.csv `
+  --training-dir data/photon/training `
+  --mask-name dose_gt_1pct `
+  --output-dir outputs/baseline_experiment/evaluate_exported
+```
+
+This writes:
+
+```text
+outputs/baseline_experiment/evaluate_exported/exported_prediction_metrics.csv
+outputs/baseline_experiment/evaluate_exported/exported_prediction_summary.csv
 ```
 
 Tiny smoke test:
