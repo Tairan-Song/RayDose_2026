@@ -146,6 +146,12 @@ def export_command(args: argparse.Namespace, python_exe: str, checkpoint: Path, 
         str(args.sample_seed),
         "--filename-style",
         args.filename_style,
+        "--full-mode",
+        args.full_mode,
+        "--sliding-stride-fraction",
+        str(args.sliding_stride_fraction),
+        "--max-sliding-windows",
+        str(args.max_sliding_windows),
         "--print-every",
         str(args.print_every),
     ]
@@ -215,6 +221,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mask-weight", type=float, default=1.0)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--filename-style", choices=("pred", "dose"), default="dose")
+    parser.add_argument("--full-mode", choices=("crop_insert", "sliding"), default="crop_insert")
+    parser.add_argument("--sliding-stride-fraction", type=float, default=0.5)
+    parser.add_argument("--max-sliding-windows", type=int, default=0)
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--save-npz", action="store_true")
     parser.add_argument("--dry-run", action="store_true")

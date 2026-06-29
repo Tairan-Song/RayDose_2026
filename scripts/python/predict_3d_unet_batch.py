@@ -12,6 +12,7 @@ import torch
 from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from mha_io import read_mha, write_float_mha
 from model_3d_unet import GeometryConditionedUNet3D
+from preprocess_training_sample import load_hu_to_density_table, preprocess_ct
 from predict_3d_unet import insert_crop, load_checkpoint
 
 
@@ -37,12 +38,96 @@ def write_manifest(path: Path, rows: list[dict[str, object]]) -> None:
         "npz",
         "crop_shape",
         "full_shape",
+        "full_mode",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def window_starts(full_dim: int, window_dim: int, stride: int) -> list[int]:
+    if full_dim <= window_dim:
+        return [0]
+    starts = list(range(0, full_dim - window_dim + 1, stride))
+    last = full_dim - window_dim
+    if starts[-1] != last:
+        starts.append(last)
+    return starts
+
+
+def extract_window(array: np.ndarray, start: tuple[int, int, int], shape: tuple[int, int, int], pad_value: float) -> np.ndarray:
+    output = np.full(shape, pad_value, dtype=array.dtype)
+    src_slices = []
+    dst_slices = []
+    for axis in range(3):
+        src_start = max(int(start[axis]), 0)
+        src_end = min(int(start[axis]) + shape[axis], array.shape[axis])
+        dst_start = src_start - int(start[axis])
+        dst_end = dst_start + (src_end - src_start)
+        src_slices.append(slice(src_start, src_end))
+        dst_slices.append(slice(dst_start, dst_end))
+    output[tuple(dst_slices)] = array[tuple(src_slices)]
+    return output
+
+
+def add_window(target: np.ndarray, weights: np.ndarray, window: np.ndarray, start: tuple[int, int, int]) -> None:
+    dst_slices = []
+    src_slices = []
+    for axis in range(3):
+        dst_start = max(int(start[axis]), 0)
+        dst_end = min(int(start[axis]) + window.shape[axis], target.shape[axis])
+        src_start = dst_start - int(start[axis])
+        src_end = src_start + (dst_end - dst_start)
+        dst_slices.append(slice(dst_start, dst_end))
+        src_slices.append(slice(src_start, src_end))
+    target[tuple(dst_slices)] += window[tuple(src_slices)]
+    weights[tuple(dst_slices)] += 1.0
+
+
+def preprocess_full_ct(training_dir: str | Path, case_id: str, ct_mode: str) -> tuple[np.ndarray, dict[str, str]]:
+    ct_img = read_mha(Path(training_dir) / case_id / "image" / "ct.mha")
+    density_table = None
+    if ct_mode == "density":
+        density_table = load_hu_to_density_table(Path(training_dir) / "beam_parameters.json")
+    return preprocess_ct(ct_img.array, ct_mode, -1000.0, 3000.0, density_table), ct_img.meta
+
+
+def sliding_window_full_prediction(
+    model: torch.nn.Module,
+    full_ct: np.ndarray,
+    condition: torch.Tensor,
+    dose_scale: float,
+    target_shape: tuple[int, int, int],
+    device: torch.device,
+    stride_fraction: float,
+    max_windows: int,
+) -> np.ndarray:
+    if stride_fraction <= 0:
+        raise ValueError("--sliding-stride-fraction must be positive")
+    stride = tuple(max(1, int(dim * stride_fraction)) for dim in target_shape)
+    starts = [
+        (x, y, z)
+        for x in window_starts(full_ct.shape[0], target_shape[0], stride[0])
+        for y in window_starts(full_ct.shape[1], target_shape[1], stride[1])
+        for z in window_starts(full_ct.shape[2], target_shape[2], stride[2])
+    ]
+    if max_windows > 0:
+        starts = starts[:max_windows]
+
+    full_sum = np.zeros(full_ct.shape, dtype=np.float32)
+    full_weight = np.zeros(full_ct.shape, dtype=np.float32)
+    condition_batch = condition[None].to(device)
+
+    with torch.no_grad():
+        for start in starts:
+            ct_window = extract_window(full_ct, start, target_shape, pad_value=-1.0)
+            ct_tensor = torch.from_numpy(ct_window[None, None].astype(np.float32)).to(device)
+            pred = model(ct_tensor, condition_batch)[0, 0].detach().cpu().numpy().astype(np.float32)
+            add_window(full_sum, full_weight, pred * dose_scale, start)
+
+    return np.divide(full_sum, np.maximum(full_weight, 1.0), out=np.zeros_like(full_sum), where=full_weight > 0)
 
 
 def predict_sample(
@@ -54,6 +139,10 @@ def predict_sample(
     sample_index: int,
     save_npz: bool,
     filename_style: str,
+    full_mode: str,
+    ckpt_args: dict,
+    stride_fraction: float,
+    max_sliding_windows: int,
 ) -> dict[str, object]:
     with torch.no_grad():
         ct = sample["ct"][None].to(device)
@@ -64,12 +153,28 @@ def predict_sample(
     pred_abs_crop = pred_norm * dose_scale
     crop_start = sample["crop_start"].numpy()
     original_shape = tuple(int(v) for v in sample["original_shape"].numpy())
-    full_pred = insert_crop(original_shape, pred_abs_crop, crop_start)
 
     case_id = str(sample["case_id"])
     beam_idx = int(sample["beam_idx"])
     cp_idx = int(sample["cp_idx"])
     ct_img = read_mha(Path(training_dir) / case_id / "image" / "ct.mha")
+
+    if full_mode == "crop_insert":
+        full_pred = insert_crop(original_shape, pred_abs_crop, crop_start)
+    elif full_mode == "sliding":
+        full_ct, _ct_meta = preprocess_full_ct(training_dir, case_id, ckpt_args.get("ct_mode", "hu"))
+        full_pred = sliding_window_full_prediction(
+            model=model,
+            full_ct=full_ct,
+            condition=sample["condition"],
+            dose_scale=dose_scale,
+            target_shape=tuple(int(v) for v in pred_abs_crop.shape),
+            device=device,
+            stride_fraction=stride_fraction,
+            max_windows=max_sliding_windows,
+        )
+    else:
+        raise ValueError(f"Unsupported full mode: {full_mode}")
 
     sample_dir = output_dir / case_id
     sample_dir.mkdir(parents=True, exist_ok=True)
@@ -122,6 +227,7 @@ def predict_sample(
         "npz": npz_value,
         "crop_shape": " ".join(str(int(v)) for v in pred_abs_crop.shape),
         "full_shape": " ".join(str(int(v)) for v in original_shape),
+        "full_mode": full_mode,
     }
 
 
@@ -163,6 +269,10 @@ def predict_batch(args: argparse.Namespace) -> None:
             idx,
             save_npz=not args.no_npz,
             filename_style=args.filename_style,
+            full_mode=args.full_mode,
+            ckpt_args=ckpt_args,
+            stride_fraction=args.sliding_stride_fraction,
+            max_sliding_windows=args.max_sliding_windows,
         )
         rows.append(row)
         if args.print_every > 0 and (idx + 1) % args.print_every == 0:
@@ -191,6 +301,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
     parser.add_argument("--filename-style", choices=("pred", "dose"), default="pred")
+    parser.add_argument("--full-mode", choices=("crop_insert", "sliding"), default="crop_insert")
+    parser.add_argument("--sliding-stride-fraction", type=float, default=0.5)
+    parser.add_argument("--max-sliding-windows", type=int, default=0)
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--no-npz", action="store_true")
     parser.add_argument("--cpu", action="store_true")

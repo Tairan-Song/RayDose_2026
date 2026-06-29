@@ -271,6 +271,7 @@ python scripts/python/run_baseline_experiment.py `
   --max-val-samples 8 `
   --eval-samples 8 `
   --export-samples 8 `
+  --full-mode crop_insert `
   --batch-size 1 `
   --epochs 5 `
   --base-channels 8
@@ -412,6 +413,7 @@ python scripts/python/predict_3d_unet_batch.py `
   --output-dir outputs/baseline_3d_unet_batch_inference `
   --max-samples 64 `
   --filename-style pred `
+  --full-mode crop_insert `
   --no-npz
 ```
 
@@ -441,6 +443,27 @@ This writes full-volume predictions named:
 
 ```text
 <case>/Dose_B<beam>_CP<cp>.mha
+```
+
+Full-volume modes:
+
+```text
+--full-mode crop_insert  fast default; predicts one isocenter crop and inserts it into the CT grid
+--full-mode sliding      predicts overlapping windows across the CT grid and averages overlap
+```
+
+Sliding-window example:
+
+```powershell
+python scripts/python/predict_3d_unet_batch.py `
+  --checkpoint outputs/baseline_3d_unet/checkpoints/best.pt `
+  --split val `
+  --output-dir outputs/baseline_3d_unet_sliding `
+  --max-samples 8 `
+  --filename-style dose `
+  --full-mode sliding `
+  --sliding-stride-fraction 0.5 `
+  --no-npz
 ```
 
 Evaluate one prediction:
