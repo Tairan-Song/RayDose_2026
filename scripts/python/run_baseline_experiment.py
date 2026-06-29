@@ -91,6 +91,8 @@ def train_command(args: argparse.Namespace, python_exe: str, train_dir: Path) ->
         str(args.num_workers),
     ]
     bool_flag(cmd, args.include_energy, "--include-energy")
+    if args.resume_checkpoint:
+        cmd.extend(["--resume-checkpoint", args.resume_checkpoint])
     bool_flag(cmd, args.cpu, "--cpu")
     return cmd
 
@@ -245,6 +247,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--mask-weight", type=float, default=1.0)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--resume-checkpoint", default="")
     parser.add_argument("--filename-style", choices=("pred", "dose"), default="dose")
     parser.add_argument("--full-mode", choices=("crop_insert", "sliding"), default="crop_insert")
     parser.add_argument("--sliding-stride-fraction", type=float, default=0.5)

@@ -31,6 +31,20 @@ def seed_worker(worker_id: int) -> None:
     np.random.seed(worker_seed)
 
 
+def load_checkpoint(path: str | Path) -> dict:
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: torch.device) -> None:
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if torch.is_tensor(value):
+                state[key] = value.to(device)
+
+
 def masked_l1(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     denom = mask.sum().clamp_min(1.0)
     return (torch.abs(pred - target) * mask).sum() / denom
@@ -174,6 +188,22 @@ def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
             writer.writerow(row)
 
 
+def read_metrics(path: Path) -> list[dict[str, float | int]]:
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    out: list[dict[str, float | int]] = []
+    for row in rows:
+        parsed: dict[str, float | int] = {"epoch": int(row["epoch"])}
+        for key, value in row.items():
+            if key == "epoch":
+                continue
+            parsed[key] = float(value)
+        out.append(parsed)
+    return out
+
+
 def train(args: argparse.Namespace) -> None:
     seed_everything(args.seed)
     target_shape = parse_int_tuple(args.target_shape)
@@ -193,9 +223,32 @@ def train(args: argparse.Namespace) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     rows: list[dict[str, float | int]] = []
+    start_epoch = 1
     best_val = float("inf")
+    if args.resume_checkpoint:
+        checkpoint = load_checkpoint(args.resume_checkpoint)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        move_optimizer_state_to_device(optimizer, device)
+        start_epoch = int(checkpoint["epoch"]) + 1
+        rows = read_metrics(output_dir / "metrics.csv")
+        if rows:
+            best_val = min(float(row["val_loss"]) for row in rows)
+        else:
+            metrics = checkpoint.get("metrics", {})
+            best_val = float(metrics.get("val_loss", best_val))
+        print(
+            f"resumed_from={args.resume_checkpoint}",
+            f"checkpoint_epoch={checkpoint['epoch']}",
+            f"next_epoch={start_epoch}",
+            flush=True,
+        )
 
-    for epoch in range(1, args.epochs + 1):
+    if start_epoch > args.epochs:
+        print(f"resume_checkpoint_epoch_already_reached target_epochs={args.epochs}")
+        return
+
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         train_loss = 0.0
         train_global = 0.0
@@ -276,6 +329,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--mask-weight", type=float, default=1.0)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--resume-checkpoint", default="")
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()
 

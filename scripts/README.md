@@ -287,6 +287,20 @@ outputs/baseline_experiment/dose_predictions/
 outputs/baseline_experiment/evaluate_exported/
 ```
 
+Resume an interrupted run:
+
+```powershell
+python scripts/python/run_baseline_experiment.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --output-dir outputs/baseline_experiment `
+  --resume-checkpoint outputs/baseline_experiment/train/checkpoints/last.pt `
+  --epochs 10
+```
+
+When resuming, `--epochs` is the target total epoch count. For example, if the
+checkpoint is epoch 4 and `--epochs 10`, training continues from epoch 5 to 10.
+
 With energy-spectrum conditioning:
 
 ```powershell
