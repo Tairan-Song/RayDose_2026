@@ -47,7 +47,46 @@ case_id,split,seed,train_fraction
 All CT, JSON, dose, and mask files from the same case must stay in the same
 split.
 
-### 2. Preprocess One Training Sample
+### 2. Validate Baseline Inputs
+
+Script:
+
+```text
+scripts/python/validate_baseline_data.py
+```
+
+Purpose:
+
+- verify the split CSV references valid case folders
+- check required CT, JSON, dose, and mask file paths
+- validate basic beam/control-point JSON fields
+- optionally read CT/dose/mask MHA files
+- write a CSV validation report
+
+Run a fast structure check:
+
+```powershell
+python scripts/python/validate_baseline_data.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --report-csv outputs/data_validation/baseline_data_validation.csv
+```
+
+By default this checks all dose/mask file paths in the split.
+
+Read a small number of MHA files as well:
+
+```powershell
+python scripts/python/validate_baseline_data.py `
+  --training-dir data/photon/training `
+  --split-csv splits/photon_case_split.csv `
+  --report-csv outputs/data_validation/baseline_data_validation_mha.csv `
+  --max-cases 5 `
+  --max-dose-files-per-case 2 `
+  --check-mha
+```
+
+### 3. Preprocess One Training Sample
 
 Script:
 
@@ -88,7 +127,7 @@ Current assumptions:
 - `--ct-mode hu` uses clipped normalized HU
 - `--ct-mode density` uses the HU-to-density table in `beam_parameters.json`
 
-### 3. PyTorch Dataset And Baseline Smoke Test
+### 4. PyTorch Dataset And Baseline Smoke Test
 
 Scripts:
 
@@ -473,7 +512,7 @@ Expected final line:
 pipeline_smoke_passed output_dir=outputs/pipeline_smoke
 ```
 
-### 4. Generate Dose-Support Labels
+### 5. Generate Dose-Support Labels
 
 Script:
 
@@ -521,7 +560,7 @@ python scripts/python/generate_dose_support_masks.py `
   --force
 ```
 
-### 5. Evaluate Alternative Mask Definitions
+### 6. Evaluate Alternative Mask Definitions
 
 Script:
 
@@ -545,7 +584,7 @@ python scripts/python/evaluate_mask_definitions.py `
   --max-files 2
 ```
 
-### 6. MHA IO Helper
+### 7. MHA IO Helper
 
 Script:
 

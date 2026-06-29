@@ -38,6 +38,7 @@ scripts/
   python/
     mha_io.py
     make_case_split.py
+    validate_baseline_data.py
     preprocess_training_sample.py
     doserad_dataset.py
     model_3d_unet.py
