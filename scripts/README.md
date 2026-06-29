@@ -222,6 +222,7 @@ Train, evaluate, and export dose-style MHA predictions:
 python scripts/python/run_baseline_experiment.py `
   --training-dir data/photon/training `
   --split-csv splits/photon_case_split.csv `
+  --make-split `
   --output-dir outputs/baseline_experiment `
   --target-shape "64 64 64" `
   --ct-mode hu `

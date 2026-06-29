@@ -28,6 +28,21 @@ def script_path(name: str) -> str:
     return str(Path(__file__).with_name(name))
 
 
+def make_split_command(args: argparse.Namespace, python_exe: str, split_csv: Path) -> list[str]:
+    return [
+        python_exe,
+        script_path("make_case_split.py"),
+        "--training-dir",
+        args.training_dir,
+        "--output-csv",
+        str(split_csv),
+        "--train-fraction",
+        str(args.train_fraction),
+        "--seed",
+        str(args.split_seed),
+    ]
+
+
 def train_command(args: argparse.Namespace, python_exe: str, train_dir: Path) -> list[str]:
     cmd = [
         python_exe,
@@ -35,7 +50,7 @@ def train_command(args: argparse.Namespace, python_exe: str, train_dir: Path) ->
         "--training-dir",
         args.training_dir,
         "--split-csv",
-        args.split_csv,
+        str(args.resolved_split_csv),
         "--output-dir",
         str(train_dir),
         "--target-shape",
@@ -89,7 +104,7 @@ def evaluate_command(args: argparse.Namespace, python_exe: str, checkpoint: Path
         "--training-dir",
         args.training_dir,
         "--split-csv",
-        args.split_csv,
+        str(args.resolved_split_csv),
         "--split",
         args.eval_split,
         "--output-dir",
@@ -118,7 +133,7 @@ def export_command(args: argparse.Namespace, python_exe: str, checkpoint: Path, 
         "--training-dir",
         args.training_dir,
         "--split-csv",
-        args.split_csv,
+        str(args.resolved_split_csv),
         "--split",
         args.export_split,
         "--output-dir",
@@ -146,9 +161,13 @@ def run_baseline(args: argparse.Namespace) -> None:
     eval_dir = output_dir / "evaluate"
     export_dir = output_dir / "dose_predictions"
     checkpoint = train_dir / "checkpoints" / "best.pt"
+    split_csv = Path(args.split_csv)
+    args.resolved_split_csv = split_csv
 
-    if not Path(args.split_csv).exists():
-        raise FileNotFoundError(f"Split CSV not found: {args.split_csv}. Run make_case_split.py first.")
+    if args.make_split and (args.overwrite_split or not split_csv.exists()):
+        run_command(make_split_command(args, python_exe, split_csv), args.dry_run)
+    elif not split_csv.exists():
+        raise FileNotFoundError(f"Split CSV not found: {split_csv}. Run make_case_split.py first or pass --make-split.")
 
     run_command(train_command(args, python_exe, train_dir), args.dry_run)
     run_command(evaluate_command(args, python_exe, checkpoint, eval_dir), args.dry_run)
@@ -166,6 +185,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--training-dir", default="data/photon/training")
     parser.add_argument("--split-csv", default="splits/photon_case_split.csv")
+    parser.add_argument("--make-split", action="store_true")
+    parser.add_argument("--overwrite-split", action="store_true")
+    parser.add_argument("--train-fraction", type=float, default=0.8)
+    parser.add_argument("--split-seed", type=int, default=20260628)
     parser.add_argument("--output-dir", default="outputs/baseline_experiment")
     parser.add_argument("--python-exe", default="")
     parser.add_argument("--target-shape", default="64 64 64")
