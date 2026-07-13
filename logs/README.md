@@ -26,6 +26,7 @@ Large generated artifacts are not stored here. The following remain local:
 | 2026-06-28 | Data preparation, mask generation, preprocessing, and baseline pipeline setup |
 | 2026-07-10 | First functional 3D U-Net baseline pipeline and local subset sanity run |
 | 2026-07-13 | Public GitHub sync policy and collaborator-facing repository organization |
+| 2026-07-13 | Full-dataset baseline goal, fixed split, checkpoints, and runtime plan |
 
 ## Public Result Policy
 

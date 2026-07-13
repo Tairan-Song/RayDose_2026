@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import time
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +92,7 @@ def run_validation(
     mask_weight: float,
     export_path: Path | None = None,
 ) -> dict[str, float]:
+    start_time = time.perf_counter()
     model.eval()
     total_loss = 0.0
     total_global = 0.0
@@ -161,6 +163,8 @@ def run_validation(
         "val_loss": total_loss / max(batches, 1),
         "val_global_l1": total_global / max(batches, 1),
         "val_masked_l1": total_masked / max(batches, 1),
+        "val_batches": batches,
+        "val_seconds": time.perf_counter() - start_time,
     }
 
 
@@ -180,7 +184,20 @@ def save_checkpoint(path: Path, model: torch.nn.Module, optimizer: torch.optim.O
 
 def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["epoch", "train_loss", "train_global_l1", "train_masked_l1", "val_loss", "val_global_l1", "val_masked_l1"]
+    fieldnames = [
+        "epoch",
+        "train_loss",
+        "train_global_l1",
+        "train_masked_l1",
+        "train_batches",
+        "train_seconds",
+        "val_loss",
+        "val_global_l1",
+        "val_masked_l1",
+        "val_batches",
+        "val_seconds",
+        "epoch_seconds",
+    ]
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -249,6 +266,8 @@ def train(args: argparse.Namespace) -> None:
         return
 
     for epoch in range(start_epoch, args.epochs + 1):
+        epoch_start = time.perf_counter()
+        train_start = time.perf_counter()
         model.train()
         train_loss = 0.0
         train_global = 0.0
@@ -280,6 +299,8 @@ def train(args: argparse.Namespace) -> None:
             "train_loss": train_loss / max(batches, 1),
             "train_global_l1": train_global / max(batches, 1),
             "train_masked_l1": train_masked / max(batches, 1),
+            "train_batches": batches,
+            "train_seconds": time.perf_counter() - train_start,
         }
         val_metrics = run_validation(
             model,
@@ -288,7 +309,7 @@ def train(args: argparse.Namespace) -> None:
             args.mask_weight,
             export_path=output_dir / "predictions" / f"val_prediction_epoch_{epoch:03d}.npz",
         )
-        row = {"epoch": epoch, **train_metrics, **val_metrics}
+        row = {"epoch": epoch, **train_metrics, **val_metrics, "epoch_seconds": time.perf_counter() - epoch_start}
         rows.append(row)
         write_metrics(output_dir / "metrics.csv", rows)
 
@@ -301,6 +322,7 @@ def train(args: argparse.Namespace) -> None:
             f"epoch={epoch}",
             f"train_loss={train_metrics['train_loss']:.6f}",
             f"val_loss={val_metrics['val_loss']:.6f}",
+            f"epoch_seconds={row['epoch_seconds']:.1f}",
             f"device={device}",
         )
 

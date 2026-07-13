@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
+from datetime import datetime, timezone
+import json
+import os
+import platform
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -13,10 +19,64 @@ def bool_flag(cmd: list[str], enabled: bool, flag: str) -> None:
         cmd.append(flag)
 
 
-def run_command(cmd: list[str], dry_run: bool) -> None:
+def run_command(cmd: list[str], dry_run: bool) -> dict[str, object]:
     print("running=" + " ".join(f'"{part}"' if " " in part else part for part in cmd), flush=True)
-    if not dry_run:
-        subprocess.run(cmd, check=True)
+    start = time.perf_counter()
+    if dry_run:
+        return {"command": cmd, "dry_run": True, "returncode": 0, "seconds": 0.0}
+    completed = subprocess.run(cmd, check=True)
+    return {"command": cmd, "dry_run": False, "returncode": completed.returncode, "seconds": time.perf_counter() - start}
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def hardware_info(cpu: bool) -> dict[str, object]:
+    info: dict[str, object] = {
+        "platform": platform.platform(),
+        "python": sys.version.replace("\n", " "),
+        "cpu_count": os.cpu_count(),
+        "force_cpu": cpu,
+    }
+    try:
+        import torch
+
+        info.update(
+            {
+                "torch": torch.__version__,
+                "cuda_available": torch.cuda.is_available(),
+                "cuda_device_count": torch.cuda.device_count(),
+                "cuda_device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "",
+            }
+        )
+    except Exception as exc:  # pragma: no cover - metadata best effort
+        info["torch_error"] = str(exc)
+    return info
+
+
+def split_and_sample_counts(training_dir: str | Path, split_csv: str | Path) -> dict[str, object]:
+    training_dir = Path(training_dir)
+    split_csv = Path(split_csv)
+    split_cases: dict[str, list[str]] = {}
+    with split_csv.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            split_cases.setdefault(row["split"], []).append(row["case_id"])
+
+    out: dict[str, object] = {"split_csv": str(split_csv), "splits": {}}
+    split_out: dict[str, object] = {}
+    for split, case_ids in sorted(split_cases.items()):
+        dose_files = 0
+        for case_id in case_ids:
+            dose_files += len(list((training_dir / case_id / "dose").glob("Dose_B*_CP*.mha")))
+        split_out[split] = {"cases": len(case_ids), "dose_samples": dose_files}
+    out["splits"] = split_out
+    return out
+
+
+def write_manifest(path: Path, manifest: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def require_path(path: Path, description: str) -> None:
@@ -182,6 +242,7 @@ def exported_eval_command(args: argparse.Namespace, python_exe: str, export_dir:
 
 
 def run_baseline(args: argparse.Namespace) -> None:
+    run_start = time.perf_counter()
     python_exe = args.python_exe or sys.executable
     output_dir = Path(args.output_dir)
     train_dir = output_dir / "train"
@@ -191,17 +252,42 @@ def run_baseline(args: argparse.Namespace) -> None:
     checkpoint = train_dir / "checkpoints" / "best.pt"
     split_csv = Path(args.split_csv)
     args.resolved_split_csv = split_csv
+    manifest_path = output_dir / "run_manifest.json"
+    stage_records: list[dict[str, object]] = []
+    manifest: dict[str, object] = {
+        "created_utc": iso_now(),
+        "status": "started",
+        "output_dir": str(output_dir),
+        "args": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
+        "hardware": hardware_info(args.cpu),
+        "data": split_and_sample_counts(args.training_dir, split_csv) if split_csv.exists() else {"split_csv": str(split_csv), "missing": True},
+        "stages": stage_records,
+    }
+    write_manifest(manifest_path, manifest)
 
     if args.make_split and (args.overwrite_split or not split_csv.exists()):
-        run_command(make_split_command(args, python_exe, split_csv), args.dry_run)
+        record = run_command(make_split_command(args, python_exe, split_csv), args.dry_run)
+        record["stage"] = "make_split"
+        stage_records.append(record)
+        manifest["data"] = split_and_sample_counts(args.training_dir, split_csv) if split_csv.exists() else manifest["data"]
+        write_manifest(manifest_path, manifest)
     elif not split_csv.exists():
         raise FileNotFoundError(f"Split CSV not found: {split_csv}. Run make_case_split.py first or pass --make-split.")
 
-    run_command(train_command(args, python_exe, train_dir), args.dry_run)
-    run_command(evaluate_command(args, python_exe, checkpoint, eval_dir), args.dry_run)
-    run_command(export_command(args, python_exe, checkpoint, export_dir), args.dry_run)
+    for stage, command in [
+        ("train", train_command(args, python_exe, train_dir)),
+        ("evaluate_checkpoint", evaluate_command(args, python_exe, checkpoint, eval_dir)),
+        ("export_predictions", export_command(args, python_exe, checkpoint, export_dir)),
+    ]:
+        record = run_command(command, args.dry_run)
+        record["stage"] = stage
+        stage_records.append(record)
+        write_manifest(manifest_path, manifest)
     if not args.skip_export_eval:
-        run_command(exported_eval_command(args, python_exe, export_dir, exported_eval_dir), args.dry_run)
+        record = run_command(exported_eval_command(args, python_exe, export_dir, exported_eval_dir), args.dry_run)
+        record["stage"] = "evaluate_exported_predictions"
+        stage_records.append(record)
+        write_manifest(manifest_path, manifest)
 
     if not args.dry_run:
         require_path(checkpoint, "best checkpoint")
@@ -210,7 +296,16 @@ def run_baseline(args: argparse.Namespace) -> None:
         require_path(export_dir / "prediction_manifest.csv", "prediction manifest")
         if not args.skip_export_eval:
             require_path(exported_eval_dir / "exported_prediction_summary.csv", "exported prediction summary CSV")
+        manifest["status"] = "complete"
+        manifest["completed_utc"] = iso_now()
+        manifest["total_seconds"] = time.perf_counter() - run_start
+        write_manifest(manifest_path, manifest)
         print(f"baseline_experiment_done output_dir={output_dir}", flush=True)
+    else:
+        manifest["status"] = "dry_run_complete"
+        manifest["completed_utc"] = iso_now()
+        manifest["total_seconds"] = time.perf_counter() - run_start
+        write_manifest(manifest_path, manifest)
 
 
 def parse_args() -> argparse.Namespace:
