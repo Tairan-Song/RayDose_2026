@@ -82,6 +82,18 @@ See:
 scripts/README.md
 ```
 
+## Project Logs
+
+Weekly public progress logs and small shareable result summaries are kept in:
+
+```text
+logs/
+```
+
+These logs summarize workflow decisions, completed tasks, baseline results, and
+next steps. Large local artifacts such as raw data, trained checkpoints, and
+full-volume dose predictions are intentionally excluded from GitHub.
+
 ## Dataset
 
 The DoseRAD2026 dataset should be obtained from the official challenge data

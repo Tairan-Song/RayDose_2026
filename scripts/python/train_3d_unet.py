@@ -119,7 +119,7 @@ def run_validation(
                 dose_scale = batch["dose_scale"][0].detach().cpu().numpy().astype(np.float32)
                 pred_norm = pred[0, 0].detach().cpu().numpy().astype(np.float32)
                 dose_norm = dose[0, 0].detach().cpu().numpy().astype(np.float32)
-                pred_abs = pred_norm * dose_scale
+                pred_abs = np.clip(pred_norm * dose_scale, 0.0, None)
                 dose_abs = dose_norm * dose_scale
                 np.savez_compressed(
                     export_path,

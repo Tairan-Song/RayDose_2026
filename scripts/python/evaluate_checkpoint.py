@@ -25,6 +25,31 @@ def tensor_scalar(value: torch.Tensor) -> float:
     return float(value.detach().cpu().item())
 
 
+def safe_percent(numerator: float, denominator: float) -> float:
+    if denominator == 0.0:
+        return float("nan")
+    return float(100.0 * numerator / denominator)
+
+
+def high_dose_metrics(diff: torch.Tensor, abs_err: torch.Tensor, dose: torch.Tensor, fraction: float) -> dict[str, float]:
+    target_max = tensor_scalar(dose.max())
+    high_mask = dose >= target_max * fraction
+    prefix = f"hd_{int(fraction * 100)}pct"
+    count = int(high_mask.sum().detach().cpu().item())
+    if count == 0:
+        return {
+            f"{prefix}_voxels": 0.0,
+            f"{prefix}_mae": float("nan"),
+            f"{prefix}_rmse": float("nan"),
+        }
+    high_diff = diff[high_mask]
+    return {
+        f"{prefix}_voxels": float(count),
+        f"{prefix}_mae": tensor_scalar(abs_err[high_mask].mean()),
+        f"{prefix}_rmse": tensor_scalar(torch.sqrt((high_diff * high_diff).mean())),
+    }
+
+
 def sample_metrics(
     pred_norm: torch.Tensor,
     dose_norm: torch.Tensor,
@@ -34,30 +59,55 @@ def sample_metrics(
     scale = dose_scale.view(-1, 1, 1, 1, 1)
     pred = pred_norm * scale
     dose = dose_norm * scale
-    abs_err = torch.abs(pred - dose)
-    sq_err = (pred - dose) ** 2
+    diff = pred - dose
+    abs_err = torch.abs(diff)
+    sq_err = diff**2
     mask_bool = mask > 0
     mask_count = int(mask_bool.sum().detach().cpu().item())
+    mae = tensor_scalar(abs_err.mean())
+    rmse = tensor_scalar(torch.sqrt(sq_err.mean()))
+    max_abs_error = tensor_scalar(abs_err.max())
+    target_max = tensor_scalar(dose.max())
 
     metrics: dict[str, float | int] = {
-        "mae": tensor_scalar(abs_err.mean()),
-        "rmse": tensor_scalar(torch.sqrt(sq_err.mean())),
-        "max_abs_error": tensor_scalar(abs_err.max()),
-        "target_max": tensor_scalar(dose.max()),
+        "mae": mae,
+        "rmse": rmse,
+        "mean_error": tensor_scalar(diff.mean()),
+        "max_abs_error": max_abs_error,
+        "target_mean": tensor_scalar(dose.mean()),
+        "pred_mean": tensor_scalar(pred.mean()),
+        "target_max": target_max,
         "pred_max": tensor_scalar(pred.max()),
+        "relative_mae_percent": safe_percent(mae, target_max),
+        "relative_rmse_percent": safe_percent(rmse, target_max),
+        "relative_max_abs_error_percent": safe_percent(max_abs_error, target_max),
         "mask_positive_voxels": mask_count,
     }
+    metrics.update(high_dose_metrics(diff, abs_err, dose, 0.1))
+    metrics.update(high_dose_metrics(diff, abs_err, dose, 0.5))
 
     if mask_count > 0:
+        masked_mae = tensor_scalar(abs_err[mask_bool].mean())
+        masked_rmse = tensor_scalar(torch.sqrt(sq_err[mask_bool].mean()))
         metrics.update(
             {
-                "masked_mae": tensor_scalar(abs_err[mask_bool].mean()),
-                "masked_rmse": tensor_scalar(torch.sqrt(sq_err[mask_bool].mean())),
+                "masked_mae": masked_mae,
+                "masked_rmse": masked_rmse,
                 "masked_max_abs_error": tensor_scalar(abs_err[mask_bool].max()),
+                "masked_relative_mae_percent": safe_percent(masked_mae, target_max),
+                "masked_relative_rmse_percent": safe_percent(masked_rmse, target_max),
             }
         )
     else:
-        metrics.update({"masked_mae": float("nan"), "masked_rmse": float("nan"), "masked_max_abs_error": float("nan")})
+        metrics.update(
+            {
+                "masked_mae": float("nan"),
+                "masked_rmse": float("nan"),
+                "masked_max_abs_error": float("nan"),
+                "masked_relative_mae_percent": float("nan"),
+                "masked_relative_rmse_percent": float("nan"),
+            }
+        )
 
     return metrics
 
@@ -74,12 +124,24 @@ def write_summary(path: Path, rows: list[dict[str, object]]) -> None:
     metric_names = [
         "mae",
         "rmse",
+        "mean_error",
         "max_abs_error",
+        "target_mean",
+        "pred_mean",
         "target_max",
         "pred_max",
+        "relative_mae_percent",
+        "relative_rmse_percent",
+        "relative_max_abs_error_percent",
+        "hd_10pct_mae",
+        "hd_10pct_rmse",
+        "hd_50pct_mae",
+        "hd_50pct_rmse",
         "masked_mae",
         "masked_rmse",
         "masked_max_abs_error",
+        "masked_relative_mae_percent",
+        "masked_relative_rmse_percent",
     ]
     summary_rows: list[dict[str, object]] = []
     for name in metric_names:
@@ -176,13 +238,27 @@ def evaluate(args: argparse.Namespace) -> None:
         "cp_idx",
         "mae",
         "rmse",
+        "mean_error",
         "max_abs_error",
+        "target_mean",
+        "pred_mean",
         "target_max",
         "pred_max",
+        "relative_mae_percent",
+        "relative_rmse_percent",
+        "relative_max_abs_error_percent",
+        "hd_10pct_voxels",
+        "hd_10pct_mae",
+        "hd_10pct_rmse",
+        "hd_50pct_voxels",
+        "hd_50pct_mae",
+        "hd_50pct_rmse",
         "mask_positive_voxels",
         "masked_mae",
         "masked_rmse",
         "masked_max_abs_error",
+        "masked_relative_mae_percent",
+        "masked_relative_rmse_percent",
     ]
     write_csv(per_sample_csv, rows, fieldnames)
     write_summary(summary_csv, rows)

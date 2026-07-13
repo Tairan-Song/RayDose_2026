@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import time
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,9 @@ def write_manifest(path: Path, rows: list[dict[str, object]]) -> None:
         "crop_shape",
         "full_shape",
         "full_mode",
+        "prediction_seconds",
+        "write_seconds",
+        "total_seconds",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -125,7 +129,7 @@ def sliding_window_full_prediction(
             ct_window = extract_window(full_ct, start, target_shape, pad_value=-1.0)
             ct_tensor = torch.from_numpy(ct_window[None, None].astype(np.float32)).to(device)
             pred = model(ct_tensor, condition_batch)[0, 0].detach().cpu().numpy().astype(np.float32)
-            add_window(full_sum, full_weight, pred * dose_scale, start)
+            add_window(full_sum, full_weight, np.clip(pred * dose_scale, 0.0, None), start)
 
     return np.divide(full_sum, np.maximum(full_weight, 1.0), out=np.zeros_like(full_sum), where=full_weight > 0)
 
@@ -144,13 +148,15 @@ def predict_sample(
     stride_fraction: float,
     max_sliding_windows: int,
 ) -> dict[str, object]:
+    total_start = time.perf_counter()
+    prediction_start = time.perf_counter()
     with torch.no_grad():
         ct = sample["ct"][None].to(device)
         condition = sample["condition"][None].to(device)
         pred_norm = model(ct, condition)[0, 0].detach().cpu().numpy().astype(np.float32)
 
     dose_scale = float(sample["dose_scale"])
-    pred_abs_crop = pred_norm * dose_scale
+    pred_abs_crop = np.clip(pred_norm * dose_scale, 0.0, None)
     crop_start = sample["crop_start"].numpy()
     original_shape = tuple(int(v) for v in sample["original_shape"].numpy())
 
@@ -175,7 +181,9 @@ def predict_sample(
         )
     else:
         raise ValueError(f"Unsupported full mode: {full_mode}")
+    prediction_seconds = time.perf_counter() - prediction_start
 
+    write_start = time.perf_counter()
     sample_dir = output_dir / case_id
     sample_dir.mkdir(parents=True, exist_ok=True)
     stem = f"{case_id}_B{beam_idx}_CP{cp_idx:03d}"
@@ -216,6 +224,8 @@ def predict_sample(
         npz_value = str(npz_path)
     else:
         npz_value = ""
+    write_seconds = time.perf_counter() - write_start
+    total_seconds = time.perf_counter() - total_start
 
     return {
         "sample_index": sample_index,
@@ -228,6 +238,9 @@ def predict_sample(
         "crop_shape": " ".join(str(int(v)) for v in pred_abs_crop.shape),
         "full_shape": " ".join(str(int(v)) for v in original_shape),
         "full_mode": full_mode,
+        "prediction_seconds": f"{prediction_seconds:.6f}",
+        "write_seconds": f"{write_seconds:.6f}",
+        "total_seconds": f"{total_seconds:.6f}",
     }
 
 

@@ -495,8 +495,16 @@ python scripts/python/evaluate_prediction.py `
 Metrics:
 
 ```text
-MAE, RMSE, max absolute error, masked MAE, masked RMSE, masked max absolute error
+MAE, RMSE, mean error, max absolute error,
+relative MAE/RMSE/max error normalized by target max dose,
+high-dose MAE/RMSE in target >=10% and >=50% max-dose regions,
+masked MAE/RMSE/max error and masked relative MAE/RMSE,
+gamma pass rate for 3%/3mm and 2%/2mm with a 10% target-dose cutoff.
 ```
+
+For this dose-regression task, AUC/accuracy are not primary metrics. They only
+make sense after converting dose to a binary support mask, so the baseline
+reports dosimetric errors and gamma pass rates instead.
 
 Evaluate a checkpoint on multiple validation samples:
 
@@ -531,6 +539,15 @@ This writes:
 outputs/baseline_experiment/evaluate_exported/exported_prediction_metrics.csv
 outputs/baseline_experiment/evaluate_exported/exported_prediction_summary.csv
 ```
+
+The exported full-volume evaluation also carries prediction timing from
+`prediction_manifest.csv`:
+
+```text
+prediction_seconds, write_seconds, total_seconds
+```
+
+Use `--skip-gamma` for quick debugging when gamma pass rates are not needed.
 
 Tiny smoke test:
 

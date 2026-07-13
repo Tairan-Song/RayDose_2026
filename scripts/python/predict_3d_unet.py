@@ -95,7 +95,7 @@ def predict(args: argparse.Namespace) -> None:
         pred_norm = model(ct, condition)[0, 0].detach().cpu().numpy().astype(np.float32)
 
     dose_scale = float(sample["dose_scale"])
-    pred_abs_crop = pred_norm * dose_scale
+    pred_abs_crop = np.clip(pred_norm * dose_scale, 0.0, None)
     crop_start = sample["crop_start"].numpy()
     original_shape = tuple(int(v) for v in sample["original_shape"].numpy())
     full_pred = insert_crop(original_shape, pred_abs_crop, crop_start)
