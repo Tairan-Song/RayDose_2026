@@ -945,6 +945,78 @@ results/2026-07-14_5epoch_intermediate_metrics.csv
 
 This is a 5-epoch intermediate milestone, not the final 10-epoch baseline.
 
+## 2026-07-14 Final 10-Epoch Baseline Completion
+
+The full-dataset 10-epoch baseline completed successfully.
+
+Formal completion audit:
+
+```text
+checks: 15
+failed: 0
+status: PASS
+```
+
+Final stage status:
+
+```text
+training epochs: 10/10
+checkpoint evaluation samples: 8100/8100
+prediction manifest rows: 8100/8100
+exported evaluation samples: 8100/8100
+missing prediction files: 0
+run manifest status: complete
+```
+
+Best checkpoint:
+
+```text
+best epoch: 8
+best val_loss: 0.0445761755
+```
+
+Runtime:
+
+```text
+training: 24,316.385 s
+checkpoint evaluation: 390.194 s
+prediction export: 2,672.059 s
+exported prediction evaluation: 6,854.612 s
+total: 34,234.842 s
+```
+
+Primary exported full-volume metrics:
+
+```text
+MAE mean: 2.2182961016e-07
+RMSE mean: 2.1204919358e-06
+Relative MAE mean: 0.3044251664 %
+Relative RMSE mean: 2.9701784284 %
+Masked MAE mean: 9.0364961658e-06
+Masked RMSE mean: 1.5969898469e-05
+Gamma 3%/3mm pass-rate mean: 0.0003129931
+Gamma 2%/2mm pass-rate mean: 0.0000833082
+```
+
+Interpretation:
+
+```text
+This is a complete and reproducible baseline, but the model quality is weak.
+The gamma pass-rate is near zero and high-dose-region errors remain large.
+The result should be used as a starting benchmark, not as a competitive final
+method.
+```
+
+Public final summary:
+
+```text
+logs/2026-07-14_10epoch_full_baseline_result.md
+results/2026-07-14_10epoch_training_metrics.csv
+results/2026-07-14_10epoch_checkpoint_eval_summary.csv
+results/2026-07-14_10epoch_exported_prediction_summary.csv
+results/2026-07-14_10epoch_completion_audit.csv
+```
+
 ## 2026-07-13 Public GitHub And Deadline Plan
 
 Release plan:

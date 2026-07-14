@@ -1,0 +1,16 @@
+status,check,detail
+PASS,train_case_count,"{'val': 15, 'train': 60}"
+PASS,val_case_count,"{'val': 15, 'train': 60}"
+PASS,manifest_train_samples,32400
+PASS,manifest_val_samples,8100
+PASS,manifest_status_complete,complete
+PASS,train_epoch_rows,10
+PASS,best_checkpoint_exists,best.pt
+PASS,last_checkpoint_exists,last.pt
+PASS,checkpoint_eval_rows,8100
+PASS,checkpoint_summary_exists,20
+PASS,prediction_manifest_rows,8100
+PASS,prediction_files_exist,missing=0
+PASS,exported_metric_rows,8100
+PASS,required_exported_summary_metrics,missing=
+PASS,exported_eval_runtime_exists,evaluation_runtime.json
