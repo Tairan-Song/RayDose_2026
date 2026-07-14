@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
+import os
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 
 from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from mha_io import write_float_mha
@@ -18,13 +20,16 @@ from model_3d_unet import GeometryConditionedUNet3D
 from preprocess_training_sample import parse_int_tuple
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int, cudnn_benchmark: bool = False) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+    if cudnn_benchmark:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
 
 
 def seed_worker(worker_id: int) -> None:
@@ -46,6 +51,34 @@ def move_optimizer_state_to_device(optimizer: torch.optim.Optimizer, device: tor
                 state[key] = value.to(device)
 
 
+def resolve_num_workers(requested: int) -> int:
+    if requested >= 0:
+        return requested
+    cpu_count = os.cpu_count() or 1
+    return max(0, min(cpu_count - 2, 8))
+
+
+def strip_module_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    if state_dict and all(key.startswith("module.") for key in state_dict):
+        return {key.removeprefix("module."): value for key, value in state_dict.items()}
+    return state_dict
+
+
+def unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+    return model.module if isinstance(model, torch.nn.DataParallel) else model
+
+
+def maybe_data_parallel(model: torch.nn.Module, args: argparse.Namespace, device: torch.device) -> torch.nn.Module:
+    if not args.data_parallel or device.type != "cuda":
+        return model
+    gpu_count = torch.cuda.device_count()
+    if gpu_count < 2:
+        print("data_parallel_requested_but_single_gpu=True", flush=True)
+        return model
+    print(f"data_parallel_enabled=True gpu_count={gpu_count}", flush=True)
+    return torch.nn.DataParallel(model)
+
+
 def masked_l1(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     denom = mask.sum().clamp_min(1.0)
     return (torch.abs(pred - target) * mask).sum() / denom
@@ -57,7 +90,37 @@ def dose_loss(pred: torch.Tensor, dose: torch.Tensor, mask: torch.Tensor, mask_w
     return global_loss + mask_weight * focus_loss, global_loss, focus_loss
 
 
+class CaseGroupedRandomSampler(Sampler[int]):
+    """Shuffle cases, then shuffle samples within each case.
+
+    This keeps nearby loader requests on the same case, so per-worker CT caching
+    is useful while preserving epoch-level randomization.
+    """
+
+    def __init__(self, samples: list[tuple[str, Path, int, int]], seed: int) -> None:
+        self.seed = seed
+        self.epoch = 0
+        self.groups: dict[str, list[int]] = {}
+        for index, sample in enumerate(samples):
+            self.groups.setdefault(sample[0], []).append(index)
+        self.case_ids = sorted(self.groups)
+
+    def __iter__(self):
+        rng = np.random.default_rng(self.seed + self.epoch)
+        self.epoch += 1
+        case_order = rng.permutation(len(self.case_ids))
+        for case_pos in case_order:
+            case_id = self.case_ids[int(case_pos)]
+            indices = np.asarray(self.groups[case_id], dtype=np.int64)
+            for index in rng.permutation(indices):
+                yield int(index)
+
+    def __len__(self) -> int:
+        return sum(len(indices) for indices in self.groups.values())
+
+
 def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle: bool) -> DataLoader:
+    num_workers = resolve_num_workers(args.num_workers)
     dataset = DoseRadControlPointDataset(
         training_dir=args.training_dir,
         split_csv=args.split_csv,
@@ -71,18 +134,52 @@ def make_loader(args: argparse.Namespace, split: str, max_samples: int, shuffle:
         include_energy=args.include_energy,
         dose_mode=args.dose_mode,
         global_dose_scale=args.global_dose_scale,
+        ct_cache_size=args.ct_cache_size,
     )
     generator = torch.Generator()
     generator.manual_seed(args.seed + (0 if split == "train" else 1))
-    return DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=shuffle,
-        num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available(),
-        worker_init_fn=seed_worker if args.num_workers > 0 else None,
-        generator=generator,
+    sampler = None
+    if split == "train" and args.case_grouped_sampling:
+        sampler = CaseGroupedRandomSampler(dataset.samples, seed=args.seed)
+        shuffle = False
+
+    loader_kwargs = {
+        "batch_size": args.batch_size,
+        "shuffle": shuffle,
+        "sampler": sampler,
+        "num_workers": num_workers,
+        "pin_memory": torch.cuda.is_available(),
+        "worker_init_fn": seed_worker if num_workers > 0 else None,
+        "generator": generator,
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = args.prefetch_factor
+    return DataLoader(dataset, **loader_kwargs)
+
+
+def move_batch_to_device(batch: dict, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    non_blocking = device.type == "cuda"
+    return (
+        batch["ct"].to(device, non_blocking=non_blocking),
+        batch["dose"].to(device, non_blocking=non_blocking),
+        batch["loss_mask"].to(device, non_blocking=non_blocking),
+        batch["condition"].to(device, non_blocking=non_blocking),
     )
+
+
+def make_grad_scaler(enabled: bool):
+    try:
+        return torch.amp.GradScaler("cuda", enabled=enabled)
+    except (AttributeError, TypeError):
+        return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def autocast_cuda(enabled: bool):
+    try:
+        return torch.amp.autocast("cuda", enabled=enabled)
+    except (AttributeError, TypeError):
+        return torch.cuda.amp.autocast(enabled=enabled)
 
 
 def run_validation(
@@ -90,29 +187,29 @@ def run_validation(
     loader: DataLoader,
     device: torch.device,
     mask_weight: float,
+    amp: bool = False,
     export_path: Path | None = None,
 ) -> dict[str, float]:
     start_time = time.perf_counter()
     model.eval()
-    total_loss = 0.0
-    total_global = 0.0
-    total_masked = 0.0
+    total_loss = torch.zeros((), device=device)
+    total_global = torch.zeros((), device=device)
+    total_masked = torch.zeros((), device=device)
     batches = 0
     exported = False
+    amp_enabled = amp and device.type == "cuda"
 
     with torch.no_grad():
         for batch in loader:
-            ct = batch["ct"].to(device)
-            dose = batch["dose"].to(device)
-            mask = batch["loss_mask"].to(device)
-            condition = batch["condition"].to(device)
+            ct, dose, mask, condition = move_batch_to_device(batch, device)
 
-            pred = model(ct, condition)
-            loss, global_loss, focus_loss = dose_loss(pred, dose, mask, mask_weight)
+            with autocast_cuda(enabled=amp_enabled):
+                pred = model(ct, condition)
+                loss, global_loss, focus_loss = dose_loss(pred, dose, mask, mask_weight)
 
-            total_loss += float(loss.cpu())
-            total_global += float(global_loss.cpu())
-            total_masked += float(focus_loss.cpu())
+            total_loss += loss.detach()
+            total_global += global_loss.detach()
+            total_masked += focus_loss.detach()
             batches += 1
 
             if export_path is not None and not exported:
@@ -160,9 +257,9 @@ def run_validation(
                 exported = True
 
     return {
-        "val_loss": total_loss / max(batches, 1),
-        "val_global_l1": total_global / max(batches, 1),
-        "val_masked_l1": total_masked / max(batches, 1),
+        "val_loss": float((total_loss / max(batches, 1)).cpu()),
+        "val_global_l1": float((total_global / max(batches, 1)).cpu()),
+        "val_masked_l1": float((total_masked / max(batches, 1)).cpu()),
         "val_batches": batches,
         "val_seconds": time.perf_counter() - start_time,
     }
@@ -173,7 +270,7 @@ def save_checkpoint(path: Path, model: torch.nn.Module, optimizer: torch.optim.O
     torch.save(
         {
             "epoch": epoch,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": unwrap_model(model).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "metrics": metrics,
             "args": vars(args),
@@ -205,6 +302,11 @@ def write_metrics(path: Path, rows: list[dict[str, float | int]]) -> None:
             writer.writerow(row)
 
 
+def write_heartbeat(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def read_metrics(path: Path) -> list[dict[str, float | int]]:
     if not path.exists():
         return []
@@ -222,7 +324,7 @@ def read_metrics(path: Path) -> list[dict[str, float | int]]:
 
 
 def train(args: argparse.Namespace) -> None:
-    seed_everything(args.seed)
+    seed_everything(args.seed, cudnn_benchmark=args.cudnn_benchmark)
     target_shape = parse_int_tuple(args.target_shape)
     if any(dim % 4 != 0 for dim in target_shape):
         raise ValueError("--target-shape dimensions must be divisible by 4 for this U-Net")
@@ -237,16 +339,16 @@ def train(args: argparse.Namespace) -> None:
         condition_dim=condition_dim(include_energy=args.include_energy),
         base_channels=args.base_channels,
     ).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    amp_enabled = args.amp and device.type == "cuda"
+    scaler = make_grad_scaler(amp_enabled)
 
     rows: list[dict[str, float | int]] = []
     start_epoch = 1
     best_val = float("inf")
+    checkpoint = None
     if args.resume_checkpoint:
         checkpoint = load_checkpoint(args.resume_checkpoint)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        move_optimizer_state_to_device(optimizer, device)
+        model.load_state_dict(strip_module_prefix(checkpoint["model_state_dict"]))
         start_epoch = int(checkpoint["epoch"]) + 1
         rows = read_metrics(output_dir / "metrics.csv")
         if rows:
@@ -261,6 +363,12 @@ def train(args: argparse.Namespace) -> None:
             flush=True,
         )
 
+    model = maybe_data_parallel(model, args, device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if checkpoint is not None:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        move_optimizer_state_to_device(optimizer, device)
+
     if start_epoch > args.epochs:
         print(f"resume_checkpoint_epoch_already_reached target_epochs={args.epochs}")
         return
@@ -269,36 +377,55 @@ def train(args: argparse.Namespace) -> None:
         epoch_start = time.perf_counter()
         train_start = time.perf_counter()
         model.train()
-        train_loss = 0.0
-        train_global = 0.0
-        train_masked = 0.0
+        train_loss = torch.zeros((), device=device)
+        train_global = torch.zeros((), device=device)
+        train_masked = torch.zeros((), device=device)
         batches = 0
 
         for batch in train_loader:
-            ct = batch["ct"].to(device)
-            dose = batch["dose"].to(device)
-            mask = batch["loss_mask"].to(device)
-            condition = batch["condition"].to(device)
-
-            pred = model(ct, condition)
-            loss, global_loss, focus_loss = dose_loss(pred, dose, mask, args.mask_weight)
+            ct, dose, mask, condition = move_batch_to_device(batch, device)
 
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            with autocast_cuda(enabled=amp_enabled):
+                pred = model(ct, condition)
+                loss, global_loss, focus_loss = dose_loss(pred, dose, mask, args.mask_weight)
 
-            train_loss += float(loss.detach().cpu())
-            train_global += float(global_loss.detach().cpu())
-            train_masked += float(focus_loss.detach().cpu())
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            train_loss += loss.detach()
+            train_global += global_loss.detach()
+            train_masked += focus_loss.detach()
             batches += 1
+
+            if args.heartbeat_every > 0 and batches % args.heartbeat_every == 0:
+                elapsed = time.perf_counter() - train_start
+                heartbeat = {
+                    "epoch": epoch,
+                    "epochs": args.epochs,
+                    "train_batches_completed": batches,
+                    "train_batches_total": len(train_loader),
+                    "train_seconds_elapsed": elapsed,
+                    "seconds_per_batch": elapsed / max(batches, 1),
+                    "device": str(device),
+                }
+                write_heartbeat(output_dir / "heartbeat.json", heartbeat)
+                print(
+                    f"heartbeat epoch={epoch}/{args.epochs}",
+                    f"train_batches={batches}/{len(train_loader)}",
+                    f"seconds_per_batch={heartbeat['seconds_per_batch']:.4f}",
+                    f"device={device}",
+                    flush=True,
+                )
 
             if args.steps_per_epoch > 0 and batches >= args.steps_per_epoch:
                 break
 
         train_metrics = {
-            "train_loss": train_loss / max(batches, 1),
-            "train_global_l1": train_global / max(batches, 1),
-            "train_masked_l1": train_masked / max(batches, 1),
+            "train_loss": float((train_loss / max(batches, 1)).cpu()),
+            "train_global_l1": float((train_global / max(batches, 1)).cpu()),
+            "train_masked_l1": float((train_masked / max(batches, 1)).cpu()),
             "train_batches": batches,
             "train_seconds": time.perf_counter() - train_start,
         }
@@ -307,6 +434,7 @@ def train(args: argparse.Namespace) -> None:
             val_loader,
             device,
             args.mask_weight,
+            amp=args.amp,
             export_path=output_dir / "predictions" / f"val_prediction_epoch_{epoch:03d}.npz",
         )
         row = {"epoch": epoch, **train_metrics, **val_metrics, "epoch_seconds": time.perf_counter() - epoch_start}
@@ -350,7 +478,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--mask-weight", type=float, default=1.0)
-    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--num-workers", type=int, default=0, help="DataLoader workers. Use -1 for automatic CPU-based selection.")
+    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument("--ct-cache-size", type=int, default=4)
+    parser.add_argument("--case-grouped-sampling", action="store_true")
+    parser.add_argument("--data-parallel", action="store_true", help="Use torch.nn.DataParallel when two or more CUDA GPUs are available.")
+    parser.add_argument("--amp", action="store_true")
+    parser.add_argument("--cudnn-benchmark", action="store_true")
+    parser.add_argument("--heartbeat-every", type=int, default=0)
     parser.add_argument("--resume-checkpoint", default="")
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()

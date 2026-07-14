@@ -21,6 +21,12 @@ def load_checkpoint(path: str | Path) -> dict:
         return torch.load(path, map_location="cpu")
 
 
+def strip_module_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    if state_dict and all(key.startswith("module.") for key in state_dict):
+        return {key.removeprefix("module."): value for key, value in state_dict.items()}
+    return state_dict
+
+
 def tensor_scalar(value: torch.Tensor) -> float:
     return float(value.detach().cpu().item())
 
@@ -187,24 +193,35 @@ def evaluate(args: argparse.Namespace) -> None:
         include_energy=include_energy,
         dose_mode=ckpt_args.get("dose_mode", "global"),
         global_dose_scale=float(ckpt_args.get("global_dose_scale", 1.5e-4)),
+        ct_cache_size=args.ct_cache_size,
     )
-    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=args.num_workers)
+    loader_kwargs = {
+        "batch_size": 1,
+        "shuffle": False,
+        "num_workers": args.num_workers,
+        "pin_memory": torch.cuda.is_available() and not args.cpu,
+    }
+    if args.num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = args.prefetch_factor
+    loader = DataLoader(dataset, **loader_kwargs)
 
     model = GeometryConditionedUNet3D(
         condition_dim=condition_dim(include_energy=include_energy),
         base_channels=int(ckpt_args.get("base_channels", 8)),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(strip_module_prefix(checkpoint["model_state_dict"]))
     model.eval()
 
     rows: list[dict[str, object]] = []
+    non_blocking = device.type == "cuda"
     with torch.no_grad():
         for idx, batch in enumerate(loader):
-            ct = batch["ct"].to(device)
-            dose = batch["dose"].to(device)
-            mask = batch["loss_mask"].to(device)
-            condition = batch["condition"].to(device)
-            dose_scale = batch["dose_scale"].to(device)
+            ct = batch["ct"].to(device, non_blocking=non_blocking)
+            dose = batch["dose"].to(device, non_blocking=non_blocking)
+            mask = batch["loss_mask"].to(device, non_blocking=non_blocking)
+            condition = batch["condition"].to(device, non_blocking=non_blocking)
+            dose_scale = batch["dose_scale"].to(device, non_blocking=non_blocking)
 
             pred = model(ct, condition)
             metrics = sample_metrics(pred, dose, mask, dose_scale)
@@ -279,6 +296,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-strategy", choices=("uniform", "random", "first"), default="uniform")
     parser.add_argument("--sample-seed", type=int, default=20260628)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument("--ct-cache-size", type=int, default=4)
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()

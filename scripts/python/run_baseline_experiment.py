@@ -24,8 +24,14 @@ def run_command(cmd: list[str], dry_run: bool) -> dict[str, object]:
     start = time.perf_counter()
     if dry_run:
         return {"command": cmd, "dry_run": True, "returncode": 0, "seconds": 0.0}
-    completed = subprocess.run(cmd, check=True)
-    return {"command": cmd, "dry_run": False, "returncode": completed.returncode, "seconds": time.perf_counter() - start}
+    completed = subprocess.run(cmd, check=False)
+    return {
+        "command": cmd,
+        "dry_run": False,
+        "returncode": completed.returncode,
+        "seconds": time.perf_counter() - start,
+        "failed": completed.returncode != 0,
+    }
 
 
 def iso_now() -> str:
@@ -149,7 +155,17 @@ def train_command(args: argparse.Namespace, python_exe: str, train_dir: Path) ->
         str(args.mask_weight),
         "--num-workers",
         str(args.num_workers),
+        "--prefetch-factor",
+        str(args.prefetch_factor),
+        "--ct-cache-size",
+        str(args.ct_cache_size),
+        "--heartbeat-every",
+        str(args.heartbeat_every),
     ]
+    bool_flag(cmd, args.case_grouped_sampling, "--case-grouped-sampling")
+    bool_flag(cmd, args.data_parallel, "--data-parallel")
+    bool_flag(cmd, args.amp, "--amp")
+    bool_flag(cmd, args.cudnn_benchmark, "--cudnn-benchmark")
     bool_flag(cmd, args.include_energy, "--include-energy")
     if args.resume_checkpoint:
         cmd.extend(["--resume-checkpoint", args.resume_checkpoint])
@@ -179,6 +195,10 @@ def evaluate_command(args: argparse.Namespace, python_exe: str, checkpoint: Path
         str(args.sample_seed),
         "--num-workers",
         str(args.num_workers),
+        "--prefetch-factor",
+        str(args.prefetch_factor),
+        "--ct-cache-size",
+        str(args.ct_cache_size),
         "--print-every",
         str(args.print_every),
     ]
@@ -216,6 +236,12 @@ def export_command(args: argparse.Namespace, python_exe: str, checkpoint: Path, 
         str(args.max_sliding_windows),
         "--print-every",
         str(args.print_every),
+        "--num-workers",
+        str(args.num_workers),
+        "--prefetch-factor",
+        str(args.prefetch_factor),
+        "--ct-cache-size",
+        str(args.ct_cache_size),
     ]
     bool_flag(cmd, not args.save_npz, "--no-npz")
     bool_flag(cmd, args.cpu, "--cpu")
@@ -223,7 +249,7 @@ def export_command(args: argparse.Namespace, python_exe: str, checkpoint: Path, 
 
 
 def exported_eval_command(args: argparse.Namespace, python_exe: str, export_dir: Path, exported_eval_dir: Path) -> list[str]:
-    return [
+    cmd = [
         python_exe,
         script_path("evaluate_exported_predictions.py"),
         "--manifest-csv",
@@ -238,7 +264,13 @@ def exported_eval_command(args: argparse.Namespace, python_exe: str, export_dir:
         str(args.export_eval_samples),
         "--print-every",
         str(args.print_every),
+        "--num-workers",
+        str(args.num_workers),
+        "--chunksize",
+        str(args.export_eval_chunksize),
     ]
+    bool_flag(cmd, args.skip_gamma, "--skip-gamma")
+    return cmd
 
 
 def run_baseline(args: argparse.Namespace) -> None:
@@ -283,11 +315,27 @@ def run_baseline(args: argparse.Namespace) -> None:
         record["stage"] = stage
         stage_records.append(record)
         write_manifest(manifest_path, manifest)
+        if int(record["returncode"]) != 0:
+            manifest["status"] = "failed"
+            manifest["failed_stage"] = stage
+            manifest["failed_returncode"] = int(record["returncode"])
+            manifest["failed_utc"] = iso_now()
+            manifest["total_seconds"] = time.perf_counter() - run_start
+            write_manifest(manifest_path, manifest)
+            raise SystemExit(int(record["returncode"]))
     if not args.skip_export_eval:
         record = run_command(exported_eval_command(args, python_exe, export_dir, exported_eval_dir), args.dry_run)
         record["stage"] = "evaluate_exported_predictions"
         stage_records.append(record)
         write_manifest(manifest_path, manifest)
+        if int(record["returncode"]) != 0:
+            manifest["status"] = "failed"
+            manifest["failed_stage"] = "evaluate_exported_predictions"
+            manifest["failed_returncode"] = int(record["returncode"])
+            manifest["failed_utc"] = iso_now()
+            manifest["total_seconds"] = time.perf_counter() - run_start
+            write_manifest(manifest_path, manifest)
+            raise SystemExit(int(record["returncode"]))
 
     if not args.dry_run:
         require_path(checkpoint, "best checkpoint")
@@ -341,15 +389,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--mask-weight", type=float, default=1.0)
-    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--num-workers", type=int, default=0, help="DataLoader workers. Use -1 for automatic CPU-based selection.")
+    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument("--ct-cache-size", type=int, default=4)
+    parser.add_argument("--case-grouped-sampling", action="store_true")
+    parser.add_argument("--data-parallel", action="store_true")
+    parser.add_argument("--amp", action="store_true")
+    parser.add_argument("--cudnn-benchmark", action="store_true")
+    parser.add_argument("--heartbeat-every", type=int, default=0)
     parser.add_argument("--resume-checkpoint", default="")
     parser.add_argument("--filename-style", choices=("pred", "dose"), default="dose")
     parser.add_argument("--full-mode", choices=("crop_insert", "sliding"), default="crop_insert")
     parser.add_argument("--sliding-stride-fraction", type=float, default=0.5)
     parser.add_argument("--max-sliding-windows", type=int, default=0)
     parser.add_argument("--print-every", type=int, default=1)
+    parser.add_argument("--export-eval-chunksize", type=int, default=1)
     parser.add_argument("--save-npz", action="store_true")
     parser.add_argument("--skip-export-eval", action="store_true")
+    parser.add_argument("--skip-gamma", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()

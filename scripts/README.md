@@ -256,6 +256,28 @@ python scripts/python/train_3d_unet.py `
   --base-channels 8
 ```
 
+Recommended throughput flags for full-dataset GPU training:
+
+```text
+--num-workers 4
+--prefetch-factor 2
+--ct-cache-size 4
+--case-grouped-sampling
+--cudnn-benchmark
+```
+
+Rationale:
+
+- `--num-workers 4` is the current local setting for an 8-logical-CPU machine.
+- `--num-workers -1` lets the script choose workers automatically as `min(cpu_count - 2, 8)`.
+- `--ct-cache-size` avoids rereading the same case CT for every control point.
+- `--case-grouped-sampling` shuffles by case first, making CT cache hits likely.
+- `--prefetch-factor` and persistent workers keep CPU workers preparing samples while the GPU trains.
+- `--cudnn-benchmark` lets cuDNN choose faster kernels for the fixed 3D crop size. It is faster, but less strictly deterministic.
+- `--amp` is available, but should be benchmarked on the target GPU. On older GPUs such as GTX 1070, AMP may reduce memory use without improving speed.
+- `--data-parallel` enables PyTorch DataParallel only when two or more CUDA GPUs are available. On the current local machine, only one GTX 1070 is detected, so this flag has no speed benefit.
+- `--heartbeat-every 500` can be used on future/resumed long runs to write `heartbeat.json` and print batch-level progress before a full epoch completes.
+
 Train, evaluate, and export dose-style MHA predictions:
 
 ```powershell
@@ -430,6 +452,9 @@ python scripts/python/predict_3d_unet_batch.py `
   --max-samples 64 `
   --filename-style pred `
   --full-mode crop_insert `
+  --num-workers 4 `
+  --prefetch-factor 2 `
+  --ct-cache-size 4 `
   --no-npz
 ```
 
@@ -530,7 +555,9 @@ python scripts/python/evaluate_exported_predictions.py `
   --manifest-csv outputs/baseline_experiment/dose_predictions/prediction_manifest.csv `
   --training-dir data/photon/training `
   --mask-name dose_gt_1pct `
-  --output-dir outputs/baseline_experiment/evaluate_exported
+  --output-dir outputs/baseline_experiment/evaluate_exported `
+  --num-workers 4 `
+  --chunksize 1
 ```
 
 This writes:
@@ -538,6 +565,7 @@ This writes:
 ```text
 outputs/baseline_experiment/evaluate_exported/exported_prediction_metrics.csv
 outputs/baseline_experiment/evaluate_exported/exported_prediction_summary.csv
+outputs/baseline_experiment/evaluate_exported/evaluation_runtime.json
 ```
 
 The exported full-volume evaluation also carries prediction timing from
@@ -548,6 +576,20 @@ prediction_seconds, write_seconds, total_seconds
 ```
 
 Use `--skip-gamma` for quick debugging when gamma pass rates are not needed.
+Do not use `--skip-gamma` for formal baseline results.
+
+Audit whether a full-dataset baseline is formally complete:
+
+```powershell
+python scripts/python/audit_full_baseline_completion.py `
+  --output-dir outputs/full_baseline_hu_no_energy_optimized_seed20260628 `
+  --split-csv splits/photon_case_split.csv `
+  --expected-epochs 10
+```
+
+The audit only passes when the full validation set has all required checkpoint
+metrics, exported `Dose_Bx_CPy.mha` predictions, exported prediction metrics,
+gamma pass-rate summaries, runtime metadata, and expected split/sample counts.
 
 Tiny smoke test:
 

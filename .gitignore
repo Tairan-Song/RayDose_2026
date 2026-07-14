@@ -2,6 +2,7 @@ data/
 outputs/
 packages/
 splits/*.csv
+!splits/photon_case_split.csv
 .tmp*/
 *.docx
 *.pdf

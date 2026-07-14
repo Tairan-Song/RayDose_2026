@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import csv
+import json
 from pathlib import Path
+import time
 
 import numpy as np
 
@@ -31,6 +34,60 @@ def write_csv(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) 
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def evaluate_one_item(payload: tuple[int, dict[str, str], str, str, float, bool]) -> dict[str, object]:
+    idx, item, training_dir_text, mask_name, gamma_cutoff_percent, skip_gamma = payload
+    training_dir = Path(training_dir_text)
+    case_id = item["case_id"]
+    beam_idx = int(item["beam_idx"])
+    cp_idx = int(item["cp_idx"])
+    pred_path = Path(item["full_mha"])
+    tgt_path = target_path(training_dir, case_id, beam_idx, cp_idx)
+    msk_path = mask_path(training_dir, case_id, beam_idx, cp_idx, mask_name) if mask_name else None
+
+    pred = read_mha(pred_path).array
+    target_img = read_mha(tgt_path)
+    target = target_img.array
+    mask = read_mha(msk_path).array if msk_path is not None else None
+
+    row: dict[str, object] = {
+        "sample_index": idx,
+        "case_id": case_id,
+        "beam_idx": beam_idx,
+        "cp_idx": cp_idx,
+        "full_mode": item.get("full_mode", ""),
+        "prediction": str(pred_path),
+        "target": str(tgt_path),
+        "mask": "" if msk_path is None else str(msk_path),
+        "prediction_seconds": item.get("prediction_seconds", ""),
+        "write_seconds": item.get("write_seconds", ""),
+        "total_seconds": item.get("total_seconds", ""),
+    }
+    row.update(
+        metrics(
+            pred,
+            target,
+            mask,
+            spacing=spacing_from_meta(target_img.meta),
+            gamma_cutoff_percent=gamma_cutoff_percent,
+            skip_gamma=skip_gamma,
+        )
+    )
+    return row
+
+
+def print_progress(completed: int, row: dict[str, object]) -> None:
+    print(
+        f"evaluated={completed}",
+        f"case={row['case_id']}",
+        f"B{row['beam_idx']}",
+        f"CP{int(row['cp_idx']):03d}",
+        f"mae={float(row['mae']):.6g}",
+        f"rel_mae={float(row['relative_mae_percent']):.3g}%",
+        f"masked_mae={float(row.get('masked_mae', 0.0)):.6g}",
+        flush=True,
+    )
 
 
 def write_summary(path: Path, rows: list[dict[str, object]]) -> None:
@@ -93,65 +150,33 @@ def write_summary(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 def evaluate_manifest(args: argparse.Namespace) -> None:
+    start_time = time.perf_counter()
     training_dir = Path(args.training_dir)
     manifest = read_manifest(Path(args.manifest_csv))
+    if args.max_samples > 0:
+        manifest = manifest[: args.max_samples]
+
+    payloads = [
+        (idx, item, str(training_dir), args.mask_name, args.gamma_cutoff_percent, args.skip_gamma)
+        for idx, item in enumerate(manifest)
+    ]
     rows: list[dict[str, object]] = []
 
-    for idx, item in enumerate(manifest):
-        if args.max_samples > 0 and idx >= args.max_samples:
-            break
-
-        case_id = item["case_id"]
-        beam_idx = int(item["beam_idx"])
-        cp_idx = int(item["cp_idx"])
-        pred_path = Path(item["full_mha"])
-        tgt_path = target_path(training_dir, case_id, beam_idx, cp_idx)
-        msk_path = mask_path(training_dir, case_id, beam_idx, cp_idx, args.mask_name) if args.mask_name else None
-
-        pred = read_mha(pred_path).array
-        target_img = read_mha(tgt_path)
-        target = target_img.array
-        mask = read_mha(msk_path).array if msk_path is not None else None
-
-        row: dict[str, object] = {
-            "sample_index": idx,
-            "case_id": case_id,
-            "beam_idx": beam_idx,
-            "cp_idx": cp_idx,
-            "full_mode": item.get("full_mode", ""),
-            "prediction": str(pred_path),
-            "target": str(tgt_path),
-            "mask": "" if msk_path is None else str(msk_path),
-            "prediction_seconds": item.get("prediction_seconds", ""),
-            "write_seconds": item.get("write_seconds", ""),
-            "total_seconds": item.get("total_seconds", ""),
-        }
-        row.update(
-            metrics(
-                pred,
-                target,
-                mask,
-                spacing=spacing_from_meta(target_img.meta),
-                gamma_cutoff_percent=args.gamma_cutoff_percent,
-                skip_gamma=args.skip_gamma,
-            )
-        )
-        rows.append(row)
-
-        if args.print_every > 0 and (idx + 1) % args.print_every == 0:
-            print(
-                f"evaluated={idx + 1}",
-                f"case={case_id}",
-                f"B{beam_idx}",
-                f"CP{cp_idx:03d}",
-                f"mae={float(row['mae']):.6g}",
-                f"rel_mae={float(row['relative_mae_percent']):.3g}%",
-                f"masked_mae={float(row.get('masked_mae', 0.0)):.6g}",
-                flush=True,
-            )
+    if args.num_workers <= 1:
+        for completed, row in enumerate(map(evaluate_one_item, payloads), start=1):
+            rows.append(row)
+            if args.print_every > 0 and completed % args.print_every == 0:
+                print_progress(completed, row)
+    else:
+        with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
+            for completed, row in enumerate(executor.map(evaluate_one_item, payloads, chunksize=args.chunksize), start=1):
+                rows.append(row)
+                if args.print_every > 0 and completed % args.print_every == 0:
+                    print_progress(completed, row)
 
     if not rows:
         raise RuntimeError(f"No rows evaluated from manifest: {args.manifest_csv}")
+    rows.sort(key=lambda row: int(row["sample_index"]))
 
     output_dir = Path(args.output_dir)
     per_sample_csv = output_dir / "exported_prediction_metrics.csv"
@@ -196,9 +221,27 @@ def evaluate_manifest(args: argparse.Namespace) -> None:
     ]
     write_csv(per_sample_csv, rows, fieldnames)
     write_summary(summary_csv, rows)
+    runtime_json = output_dir / "evaluation_runtime.json"
+    runtime_json.write_text(
+        json.dumps(
+            {
+                "manifest_csv": str(args.manifest_csv),
+                "samples": len(rows),
+                "num_workers": args.num_workers,
+                "chunksize": args.chunksize,
+                "skip_gamma": args.skip_gamma,
+                "gamma_cutoff_percent": args.gamma_cutoff_percent,
+                "wall_seconds": time.perf_counter() - start_time,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
     print(f"wrote_per_sample={per_sample_csv}", flush=True)
     print(f"wrote_summary={summary_csv}", flush=True)
+    print(f"wrote_runtime={runtime_json}", flush=True)
     print(f"samples={len(rows)}", flush=True)
 
 
@@ -212,6 +255,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print-every", type=int, default=1)
     parser.add_argument("--gamma-cutoff-percent", type=float, default=10.0)
     parser.add_argument("--skip-gamma", action="store_true")
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--chunksize", type=int, default=1)
     return parser.parse_args()
 
 

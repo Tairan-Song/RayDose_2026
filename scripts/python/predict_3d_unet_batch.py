@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from doserad_dataset import DoseRadControlPointDataset, condition_dim
 from mha_io import read_mha, write_float_mha
@@ -17,13 +18,19 @@ from preprocess_training_sample import load_hu_to_density_table, preprocess_ct
 from predict_3d_unet import insert_crop, load_checkpoint
 
 
+def strip_module_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    if state_dict and all(key.startswith("module.") for key in state_dict):
+        return {key.removeprefix("module."): value for key, value in state_dict.items()}
+    return state_dict
+
+
 def load_model(checkpoint: dict, include_energy: bool, device: torch.device) -> GeometryConditionedUNet3D:
     ckpt_args = checkpoint["args"]
     model = GeometryConditionedUNet3D(
         condition_dim=condition_dim(include_energy=include_energy),
         base_channels=int(ckpt_args.get("base_channels", 8)),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(strip_module_prefix(checkpoint["model_state_dict"]))
     model.eval()
     return model
 
@@ -266,13 +273,23 @@ def predict_batch(args: argparse.Namespace) -> None:
         include_energy=include_energy,
         dose_mode=ckpt_args.get("dose_mode", "global"),
         global_dose_scale=float(ckpt_args.get("global_dose_scale", 1.5e-4)),
+        ct_cache_size=args.ct_cache_size,
     )
     model = load_model(checkpoint, include_energy, device)
+    loader_kwargs = {
+        "batch_size": None,
+        "shuffle": False,
+        "num_workers": args.num_workers,
+        "pin_memory": False,
+    }
+    if args.num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = args.prefetch_factor
+    loader = DataLoader(dataset, **loader_kwargs)
 
     output_dir = Path(args.output_dir)
     rows: list[dict[str, object]] = []
-    for idx in range(len(dataset)):
-        sample = dataset[idx]
+    for idx, sample in enumerate(loader):
         row = predict_sample(
             sample,
             model,
@@ -318,6 +335,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sliding-stride-fraction", type=float, default=0.5)
     parser.add_argument("--max-sliding-windows", type=int, default=0)
     parser.add_argument("--print-every", type=int, default=1)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument("--ct-cache-size", type=int, default=4)
     parser.add_argument("--no-npz", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     return parser.parse_args()

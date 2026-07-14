@@ -94,6 +94,13 @@ def count_manifest_predictions(path: Path) -> int:
     return len(rows)
 
 
+def file_detail(path: Path) -> str:
+    if not path.exists():
+        return f"{path.name}=missing"
+    modified = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+    return f"{path.name}=found; modified={modified}; bytes={path.stat().st_size}"
+
+
 def output_report(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     manifest = read_json(output_dir / "run_manifest.json")
@@ -104,6 +111,8 @@ def output_report(args: argparse.Namespace) -> None:
     exported_rows = read_csv_rows(output_dir / "evaluate_exported" / "exported_prediction_metrics.csv")
     active_pid = read_pid(output_dir / "full_run_python.pid")
     active_pid_running = pid_is_running(active_pid)
+    epoch1_val_prediction = output_dir / "train" / "predictions" / "val_prediction_epoch_001.npz"
+    epoch1_validation_started = epoch1_val_prediction.exists()
 
     stages = manifest.get("stages", [])
     stage_seconds = {stage.get("stage", ""): float(stage.get("seconds", 0.0)) for stage in stages}
@@ -143,6 +152,11 @@ def output_report(args: argparse.Namespace) -> None:
             f"last_epoch_seconds={fmt_seconds(last_epoch_seconds)}",
         ),
         checkpoint_status(
+            "2a_first_epoch_validation_started",
+            epoch1_validation_started or completed_epochs >= 1,
+            file_detail(epoch1_val_prediction),
+        ),
+        checkpoint_status(
             "3_training_complete",
             completed_epochs >= target_epochs
             and (output_dir / "train" / "checkpoints" / "best.pt").exists()
@@ -176,6 +190,7 @@ def output_report(args: argparse.Namespace) -> None:
     print(f"train_samples_recorded={train_count}")
     print(f"val_samples_recorded={val_count}")
     print(f"completed_epochs={completed_epochs}/{target_epochs}")
+    print(f"epoch1_validation_started={epoch1_validation_started}")
     print(f"active_training_pid={active_pid if active_pid is not None else 'unknown'}")
     print(f"active_training_pid_running={active_pid_running}")
     print(f"run_elapsed={fmt_seconds(elapsed_seconds)}")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -168,6 +169,7 @@ class DoseRadControlPointDataset(Dataset):
         global_dose_scale: float = 1.5e-4,
         hu_min: float = -1000.0,
         hu_max: float = 3000.0,
+        ct_cache_size: int = 4,
     ) -> None:
         self.training_dir = Path(training_dir)
         self.split_csv = Path(split_csv)
@@ -180,6 +182,7 @@ class DoseRadControlPointDataset(Dataset):
         self.global_dose_scale = global_dose_scale
         self.hu_min = hu_min
         self.hu_max = hu_max
+        self.ct_cache_size = ct_cache_size
         self.hu_density_table = None
         if ct_mode == "density":
             self.hu_density_table = load_hu_to_density_table(self.training_dir / "beam_parameters.json")
@@ -200,6 +203,7 @@ class DoseRadControlPointDataset(Dataset):
             raise RuntimeError(f"No samples found for split={split!r}")
 
         self._case_json_cache: dict[str, dict] = {}
+        self._ct_cache: OrderedDict[str, dict[str, np.ndarray | dict[str, str] | tuple[int, int, int]]] = OrderedDict()
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -209,24 +213,49 @@ class DoseRadControlPointDataset(Dataset):
             self._case_json_cache[case_id] = load_case_json(self.training_dir / case_id)
         return self._case_json_cache[case_id]
 
+    def _ct_data(self, case_id: str) -> dict[str, np.ndarray | dict[str, str] | tuple[int, int, int]]:
+        if self.ct_cache_size > 0 and case_id in self._ct_cache:
+            self._ct_cache.move_to_end(case_id)
+            return self._ct_cache[case_id]
+
+        ct_img = read_mha(self.training_dir / case_id / "image" / "ct.mha")
+        ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
+        data: dict[str, np.ndarray | dict[str, str] | tuple[int, int, int]] = {
+            "array": ct.astype(np.float32, copy=False),
+            "meta": ct_img.meta,
+            "shape": tuple(int(v) for v in ct_img.array.shape),
+            "spacing": spacing_from_meta(ct_img.meta),
+            "offset": offset_from_meta(ct_img.meta),
+        }
+
+        if self.ct_cache_size > 0:
+            self._ct_cache[case_id] = data
+            while len(self._ct_cache) > self.ct_cache_size:
+                self._ct_cache.popitem(last=False)
+        return data
+
     def __getitem__(self, index: int) -> dict[str, torch.Tensor | str | int]:
         case_id, dose_path, beam_idx, cp_idx = self.samples[index]
         case_dir = self.training_dir / case_id
         beam, cp = find_control_point(self._case_data(case_id), beam_idx, cp_idx)
 
-        ct_img = read_mha(case_dir / "image" / "ct.mha")
+        ct_data = self._ct_data(case_id)
         dose_img = read_mha(dose_path)
         mask_img = read_mha(case_dir / "label_masks" / self.mask_name / f"Dose_B{beam_idx}_CP{cp_idx:03d}_mask.mha")
 
-        center = voxel_index_from_physical(ct_img.meta, beam["iso_center"])
+        ct_meta = ct_data["meta"]
+        if not isinstance(ct_meta, dict):
+            raise TypeError("Cached CT metadata has invalid type")
+        center = voxel_index_from_physical(ct_meta, beam["iso_center"])
         if center is None:
-            center = tuple(int(v // 2) for v in ct_img.array.shape)
+            center = tuple(int(v // 2) for v in ct_data["shape"])
 
-        spacing = spacing_from_meta(ct_img.meta)
+        spacing = np.asarray(ct_data["spacing"], dtype=np.float32)
+        offset = np.asarray(ct_data["offset"], dtype=np.float32)
         start = crop_start(center, self.target_shape)
-        crop_offset = offset_from_meta(ct_img.meta) + start * spacing
+        crop_offset = offset + start * spacing
 
-        ct = preprocess_ct(ct_img.array, self.ct_mode, self.hu_min, self.hu_max, self.hu_density_table)
+        ct = np.asarray(ct_data["array"], dtype=np.float32)
         dose, dose_max, dose_scale = scale_dose(dose_img.array, self.dose_mode, self.global_dose_scale)
         mask = (mask_img.array > 0).astype(np.float32)
 
@@ -244,7 +273,7 @@ class DoseRadControlPointDataset(Dataset):
             "dose_scale": torch.tensor(dose_scale, dtype=torch.float32),
             "crop_offset": torch.from_numpy(crop_offset.astype(np.float32)),
             "crop_start": torch.from_numpy(start.astype(np.int32)),
-            "original_shape": torch.tensor(ct_img.array.shape, dtype=torch.int32),
+            "original_shape": torch.tensor(ct_data["shape"], dtype=torch.int32),
             "element_spacing": torch.from_numpy(spacing.astype(np.float32)),
             "case_id": case_id,
             "beam_idx": beam_idx,
